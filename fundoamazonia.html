@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hub do Projeto - Marinha Amazônia Protegida</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;600;700&display=swap');
+        
+        body { font-family: 'Barlow', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        
+        /* Tema Naval - Cards Claros */
+        .naval-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+        }
+        .naval-card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transform: translateY(-2px);
+        }
+
+        /* Map Styles Updated for Light Theme */
+        .map-container { position: relative; height: 100%; min-height: 400px; width: 100%; }
+        .state-path { fill: #cbd5e1; stroke: #94a3b8; stroke-width: 1; transition: all 0.3s; cursor: pointer; }
+        .state-path:hover { fill: #94a3b8; }
+        /* Cores mais vibrantes para o tema claro */
+        .state-path.active-4dn { fill: #0284c7; filter: drop-shadow(0 0 8px rgba(2, 132, 199, 0.4)); } /* Sky Blue Darker */
+        .state-path.active-9dn { fill: #059669; filter: drop-shadow(0 0 8px rgba(5, 150, 105, 0.4)); } /* Emerald Darker */
+        
+        /* Timeline Horizontal Scroll */
+        .timeline-scroll-container {
+            display: flex;
+            overflow-x: auto;
+            gap: 2rem;
+            padding-bottom: 2rem;
+            padding-top: 1rem;
+            scroll-behavior: smooth;
+            /* Esconde scrollbar mas permite scroll */
+            scrollbar-width: thin;
+            scrollbar-color: #1e3a8a #e2e8f0;
+        }
+        
+        /* Estilo da barra de rolagem horizontal */
+        .timeline-scroll-container::-webkit-scrollbar {
+            height: 8px;
+        }
+        .timeline-scroll-container::-webkit-scrollbar-track {
+            background: #e2e8f0;
+            border-radius: 4px;
+        }
+        .timeline-scroll-container::-webkit-scrollbar-thumb {
+            background-color: #1e3a8a; /* Azul Marinha */
+            border-radius: 4px;
+        }
+
+        /* Linha conectora horizontal */
+        .timeline-connector {
+            position: absolute;
+            top: 24px; /* Ajustar conforme altura do ícone */
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: #e2e8f0;
+            z-index: 0;
+            width: 100%;
+        }
+
+        /* Animations */
+        .fade-in-up { animation: fadeInUp 0.6s ease-out forwards; opacity: 0; transform: translateY(20px); }
+        @keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
+        
+        /* Toast Notification */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #1e3a8a;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 16px;
+            position: fixed;
+            z-index: 100;
+            right: 30px;
+            bottom: 30px;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            opacity: 0;
+            transition: opacity 0.3s, bottom 0.3s;
+        }
+        #toast.show {
+            visibility: visible;
+            opacity: 1;
+            bottom: 30px;
+        }
+
+        /* Scrollbar Global */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
+</head>
+<body class="overflow-x-hidden bg-slate-50">
+
+    <!-- Header / Navbar: Azul Marinha -->
+    <header class="fixed w-full top-0 z-50 bg-[#003580] shadow-lg border-b border-blue-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <div class="flex items-center gap-4">
+                    <!-- Logo Marinha Substituído -->
+                    <img src="logo-marinha.png" alt="Logo Marinha" class="h-12 w-auto object-contain drop-shadow-md">
+                    
+                    <div>
+                        <h1 class="text-xl font-bold tracking-wider text-white uppercase">Amazônia Protegida</h1>
+                        <p class="text-xs text-blue-200 font-medium">Marinha do Brasil &bull; Fundo Amazônia</p>
+                    </div>
+                </div>
+                
+                <nav class="hidden md:flex gap-8 text-sm font-semibold">
+                    <a href="#dashboard" class="text-blue-100 hover:text-white hover:bg-blue-800/50 px-3 py-2 rounded transition">Metas & Investimentos</a>
+                    <a href="#timeline" class="text-blue-100 hover:text-white hover:bg-blue-800/50 px-3 py-2 rounded transition">Linha do Tempo</a>
+                </nav>
+
+                <div class="hidden md:flex flex-col items-end">
+                    <span class="text-xs text-blue-200 uppercase tracking-widest">Valor Total do Projeto</span>
+                    <span class="text-xl font-bold text-white">R$ 149,5 Milhões</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Spacer for fixed header -->
+    <div class="h-24"></div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-16">
+
+        <!-- SECTION 1: DASHBOARD DE METAS -->
+        <section id="dashboard" class="fade-in-up">
+            <div class="flex flex-col md:flex-row justify-between items-end mb-8 border-b border-slate-200 pb-4">
+                <div>
+                    <h2 class="text-3xl font-bold text-[#003580] mb-2"><i class="fa-solid fa-chart-pie mr-3 text-blue-600"></i>Painel de Metas</h2>
+                    <p class="text-slate-600">Distribuição orçamentária por Distrito Naval e aquisições estratégicas.</p>
+                </div>
+                <div class="mt-4 md:mt-0 flex gap-2">
+                    <button onclick="filterMetas('all')" class="px-4 py-2 text-xs font-bold rounded bg-slate-200 hover:bg-slate-300 text-slate-700 transition shadow-sm">TODOS</button>
+                    <button onclick="filterMetas('9dn')" class="px-4 py-2 text-xs font-bold rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition shadow-sm border border-emerald-200">9º DN (MANAUS)</button>
+                    <button onclick="filterMetas('4dn')" class="px-4 py-2 text-xs font-bold rounded bg-sky-100 hover:bg-sky-200 text-sky-800 transition shadow-sm border border-sky-200">4º DN (BELÉM)</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                
+                <!-- Coluna Esquerda: Mapa (Light Theme) -->
+                <div class="lg:col-span-5 naval-card rounded-2xl p-6 flex flex-col justify-between bg-white">
+                    <h3 class="text-sm font-bold text-slate-500 uppercase mb-4 tracking-widest">Área de Atuação</h3>
+                    
+                    <div class="map-container flex items-center justify-center relative">
+                        <!-- Mapa SVG Brasil (Norte Focado) -->
+                        <svg viewBox="50 0 500 400" class="w-full h-full drop-shadow-md">
+                            <!-- Background Brazil (Outline/Context) -->
+                            <path d="M250,300 L300,350 L200,400 Z" class="fill-slate-100 stroke-slate-200"></path>
+
+                            <!-- 9º Distrito (AM, RO, RR, AC) -->
+                            <g id="map-9dn" class="group cursor-pointer" onclick="filterMetas('9dn')">
+                                <path d="M100,50 L240,50 L260,150 L180,220 L60,150 Z" class="state-path active-9dn"></path>
+                                <text x="140" y="120" class="fill-white text-xs font-bold opacity-90 pointer-events-none drop-shadow-md">9º DN</text>
+                                <circle cx="160" cy="140" r="4" class="fill-white animate-pulse"></circle>
+                            </g>
+
+                            <!-- 4º Distrito (PA, AP, MA) -->
+                            <g id="map-4dn" class="group cursor-pointer" onclick="filterMetas('4dn')">
+                                <path d="M240,50 L380,50 L400,180 L260,180 L260,150 Z" class="state-path active-4dn"></path>
+                                <text x="320" y="100" class="fill-white text-xs font-bold opacity-90 pointer-events-none drop-shadow-md">4º DN</text>
+                                <circle cx="340" cy="90" r="4" class="fill-white animate-pulse"></circle>
+                            </g>
+                        </svg>
+
+                        <!-- Legenda Mapa -->
+                        <div class="absolute bottom-0 left-0 bg-white/90 p-3 rounded-lg border border-slate-200 shadow text-xs space-y-2">
+                            <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-emerald-600"></div>9º Distrito (AM/RO/RR)</div>
+                            <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-sky-600"></div>4º Distrito (PA/AP/MA)</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-slate-100 grid grid-cols-2 gap-4 text-center">
+                        <div>
+                            <span class="block text-2xl font-bold text-[#003580]">9</span>
+                            <span class="text-xs text-slate-500 uppercase">Metas Totais</span>
+                        </div>
+                        <div>
+                            <span class="block text-2xl font-bold text-[#003580]">2</span>
+                            <span class="text-xs text-slate-500 uppercase">Distritos Navais</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Coluna Direita: Cards das Metas (Light Theme) -->
+                <div class="lg:col-span-7 space-y-4 max-h-[600px] overflow-y-auto pr-2" id="metas-container">
+                    
+                    <!-- META 1 (9DN) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-emerald-600 hover:bg-emerald-50 transition-colors" data-dn="9dn">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-emerald-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-screwdriver-wrench text-emerald-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 1: Remotorização NPaFlu "Pedro Teixeira"</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Modernização do sistema de propulsão.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase rounded border border-emerald-200">9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-emerald-700 whitespace-nowrap">R$ 26.617.640</span>
+                        </div>
+                    </div>
+
+                    <!-- META 2 (Shared) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-purple-600 hover:bg-purple-50 transition-colors" data-dn="all">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-purple-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-life-ring text-purple-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 2: Lanchas SAR Multipropósito</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Aquisição de lanchas de Busca e Salvamento.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-slate-200 text-slate-700 text-[10px] font-bold uppercase rounded">4º DN / 9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-purple-700 whitespace-nowrap">R$ 13.375.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 3 (4DN) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-sky-600 hover:bg-sky-50 transition-colors" data-dn="4dn">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-sky-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-plane text-sky-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 3: Aeronave Asa Fixa Anfíbia</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Aquisição de aeronave com capacidade de operação anfíbia.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-sky-100 text-sky-700 text-[10px] font-bold uppercase rounded border border-sky-200">4º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-sky-700 whitespace-nowrap">R$ 40.625.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 4 (9DN) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-emerald-600 hover:bg-emerald-50 transition-colors" data-dn="9dn">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-emerald-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-box text-emerald-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 4: Navio Apoio Logístico Fluvial</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Embarcação de baixo calado.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-bold uppercase rounded border border-emerald-200">9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-emerald-700 whitespace-nowrap">R$ 7.000.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 5 (4DN) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-sky-600 hover:bg-sky-50 transition-colors" data-dn="4dn">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-sky-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-ship text-sky-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 5: Empurrador com Balsa</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Suporte logístico para transporte de material.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-sky-100 text-sky-700 text-[10px] font-bold uppercase rounded border border-sky-200">4º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-sky-700 whitespace-nowrap">R$ 14.000.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 6 (Shared) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-purple-600 hover:bg-purple-50 transition-colors" data-dn="all">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-purple-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-gears text-purple-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 6: Remotorização LAR</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Renovação de motores das Lanchas de Ação Rápida.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-slate-200 text-slate-700 text-[10px] font-bold uppercase rounded">4º DN / 9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-purple-700 whitespace-nowrap">R$ 5.670.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 7 (Shared) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-purple-600 hover:bg-purple-50 transition-colors" data-dn="all">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-purple-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-shield-halved text-purple-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 7: Lanchas Blindadas</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Aquisição de Lanchas Blindadas para operações de risco.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-slate-200 text-slate-700 text-[10px] font-bold uppercase rounded">4º DN / 9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-purple-700 whitespace-nowrap">R$ 15.200.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 8 (Shared) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-purple-600 hover:bg-purple-50 transition-colors" data-dn="all">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-purple-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-paper-plane text-purple-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 8: Drones (ARP)</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Aquisição de Aeronaves Remotamente Pilotadas.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-slate-200 text-slate-700 text-[10px] font-bold uppercase rounded">4º DN / 9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-purple-700 whitespace-nowrap">R$ 312.000</span>
+                        </div>
+                    </div>
+
+                    <!-- META 9 (Shared) -->
+                    <div class="meta-card naval-card p-5 rounded-xl border-l-4 border-purple-600 hover:bg-purple-50 transition-colors" data-dn="all">
+                        <div class="flex justify-between items-start">
+                            <div class="flex gap-4">
+                                <div class="bg-purple-100 p-3 rounded-lg h-fit"><i class="fa-solid fa-satellite-dish text-purple-600 text-xl"></i></div>
+                                <div>
+                                    <h4 class="text-lg font-bold text-[#003580]">META 9: Sistema SARP-E</h4>
+                                    <p class="text-sm text-slate-600 mt-1">Aquisição de Sistema de Aeronaves Remotamente Tripuladas Embarcado.</p>
+                                    <div class="mt-3 flex gap-2">
+                                        <span class="px-2 py-1 bg-slate-200 text-slate-700 text-[10px] font-bold uppercase rounded">4º DN / 9º DN</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="font-mono font-bold text-purple-700 whitespace-nowrap">R$ 26.750.000</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+
+        <!-- SECTION 2: HORIZONTAL TIMELINE -->
+        <section id="timeline" class="fade-in-up delay-200">
+            <h2 class="text-3xl font-bold text-[#003580] mb-4 border-b border-slate-200 pb-4"><i class="fa-solid fa-clock-rotate-left mr-3 text-yellow-500"></i>Linha do Tempo de Aprovação</h2>
+            <p class="text-sm text-slate-500 mb-6 flex items-center gap-2"><i class="fa-solid fa-arrow-right-long text-blue-600 animate-pulse"></i> Arraste para o lado para ver todo o histórico</p>
+            
+            <div class="relative w-full">
+                <!-- Connector Line (Background) -->
+                <div class="absolute top-[3.5rem] left-0 w-full h-1 bg-slate-200 hidden md:block z-0"></div>
+
+                <!-- Scrollable Container -->
+                <div class="timeline-scroll-container pb-8" id="timeline-container">
+                    <!-- Javascript will populate this with HORIZONTAL CARDS -->
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer Updated -->
+    <footer class="bg-[#003580] text-white border-t border-blue-800 py-10 mt-20 text-center">
+        <div class="max-w-7xl mx-auto px-4">
+            <p class="text-blue-200 mb-2 font-medium">Marinha do Brasil &copy; 2025</p>
+            <p class="text-blue-300 text-xs opacity-70">
+                Fontes: "Resumo das Metas.docx" e Mensagens SGERAL/ARMADA (2023-2024).<br>
+                Este painel é um instrumento de visualização gerado por IA para apoio à decisão.
+            </p>
+        </div>
+    </footer>
+
+    <!-- Toast Notification Element (Mantido apenas para visual, opcional) -->
+    <div id="toast"></div>
+
+    <script>
+        // --- LOGIC FOR FILTERING METAS ---
+        function filterMetas(district) {
+            const cards = document.querySelectorAll('.meta-card');
+            cards.forEach(card => {
+                const dn = card.getAttribute('data-dn');
+                // LOGIC: Show card if filter is 'all', OR if card is specific to district, OR if card is shared ('all')
+                if (district === 'all' || dn === district || dn === 'all') {
+                    card.style.display = 'block';
+                    card.classList.add('fade-in-up');
+                } else {
+                    card.style.display = 'none';
+                    card.classList.remove('fade-in-up');
+                }
+            });
+
+            // Update Map Visuals
+            const path9 = document.querySelector('.active-9dn');
+            const path4 = document.querySelector('.active-4dn');
+            
+            if(district === '9dn') {
+                path9.style.opacity = '1'; path4.style.opacity = '0.3';
+            } else if(district === '4dn') {
+                path9.style.opacity = '0.3'; path4.style.opacity = '1';
+            } else {
+                path9.style.opacity = '1'; path4.style.opacity = '1';
+            }
+        }
+
+        // --- TIMELINE DATA (UPDATED) ---
+        const timelineData = [
+            {
+                date: "22 NOV 2023",
+                year: "2023",
+                title: "Início das Tratativas",
+                type: "meeting",
+                summary: "Reunião inicial com BNDES, GCM e SGM.",
+                details: "Objetivo: Ampliar conhecimentos sobre o Fundo Amazônia e diretrizes de governança.",
+                doc: "1.pdf"
+            },
+            {
+                date: "07 DEZ 2023",
+                year: "2023",
+                title: "Ordem de Análise",
+                type: "order",
+                summary: "COMMAR determina elaboração de projetos.",
+                details: "Determinação para analisar e propor projetos de interesse da Força Naval até 15MAR.",
+                doc: "2.pdf"
+            },
+            {
+                date: "05 FEV 2024",
+                year: "2024",
+                title: "Coordenação Inicial",
+                type: "meeting",
+                summary: "Agendamento de Videoconferência (VC).",
+                details: "ARMADA solicita VC para estruturação dos projetos e cronograma.",
+                doc: "3.pdf"
+            },
+            {
+                date: "27 JUN 2024",
+                year: "2024",
+                title: "Aprovação do Programa",
+                type: "check",
+                summary: "Programa 'Amazônia Protegida' aprovado.",
+                details: "COMMAR aprova teor e ordena prosseguimento para inclusão no BNDES.",
+                doc: "4.pdf"
+            },
+            {
+                date: "28 JUN 2024",
+                year: "2024",
+                title: "Acesso ao BNDES",
+                type: "tech",
+                summary: "Solicitação de habilitação no Portal.",
+                details: "Habilitação do usuário CC (IM) Bruno Reis Moura no sistema do BNDES.",
+                doc: "5.pdf"
+            },
+            {
+                date: "25 OUT 2024",
+                year: "2024",
+                title: "Validação Externa",
+                type: "star",
+                summary: "Aprovação na Subcomissão do PPCDAm.",
+                details: "Projeto apresentado na 15ª Reunião sem sugestões de aprimoramento.",
+                doc: "6.pdf"
+            },
+            {
+                date: "21 NOV 2024",
+                year: "2024",
+                title: "Diretrizes Orçamentárias",
+                type: "money",
+                summary: "Definições sobre recursos e OGU.",
+                details: "Recursos classificados como 'doação'. Inclusão obrigatória no OGU 2025.",
+                doc: "7.pdf"
+            },
+            {
+                date: "29 NOV 2024",
+                year: "2024",
+                title: "Reta Final",
+                type: "alert",
+                summary: "Projeto no Portal do Cliente do BNDES",
+                details: "Inclusão do REF projeto no Portal do Cliente do BNDES.",
+                doc: "8.pdf"
+            }
+        ];
+
+        const timelineContainer = document.getElementById('timeline-container');
+
+        const getIcon = (type) => {
+            switch(type) {
+                case 'meeting': return 'fa-users';
+                case 'order': return 'fa-gavel';
+                case 'team': return 'fa-user-tie';
+                case 'check': return 'fa-circle-check';
+                case 'tech': return 'fa-laptop-code';
+                case 'star': return 'fa-star';
+                case 'money': return 'fa-coins';
+                case 'alert': return 'fa-bell';
+                default: return 'fa-file-lines';
+            }
+        };
+
+        const getColorClass = (type) => {
+             switch(type) {
+                case 'check': return 'bg-green-100 text-green-700 border-green-300';
+                case 'star': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
+                case 'alert': return 'bg-red-100 text-red-700 border-red-300';
+                case 'money': return 'bg-emerald-100 text-emerald-700 border-emerald-300';
+                default: return 'bg-blue-100 text-blue-800 border-blue-300';
+            }
+        };
+
+        const getIconBg = (type) => {
+             switch(type) {
+                case 'check': return 'bg-green-600';
+                case 'star': return 'bg-yellow-500';
+                case 'alert': return 'bg-red-500';
+                case 'money': return 'bg-emerald-600';
+                default: return 'bg-[#003580]';
+            }
+        };
+
+        // RENDER HORIZONTAL TIMELINE
+        timelineData.forEach((event, index) => {
+            const colorClass = getColorClass(event.type);
+            const iconBg = getIconBg(event.type);
+            const icon = getIcon(event.type);
+
+            // Card Structure for Horizontal Layout
+            const card = document.createElement('div');
+            // 'flex-none' ensures cards don't shrink, 'w-80' sets fixed width
+            card.className = "flex-none w-80 relative pt-14 group snap-center"; 
+            
+            const content = `
+                <!-- Connector Dot -->
+                <div class="absolute top-[3rem] left-1/2 transform -translate-x-1/2 z-10">
+                    <div class="w-4 h-4 rounded-full ${iconBg} border-4 border-white shadow-md group-hover:scale-125 transition-transform"></div>
+                </div>
+
+                <!-- Card Content -->
+                <div class="naval-card rounded-xl p-5 border-t-4 ${colorClass.split(' ')[2].replace('border', 'border-t')} h-full flex flex-col">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-500">${event.date}</span>
+                        <div class="w-6 h-6 rounded-full ${iconBg} flex items-center justify-center shadow-sm">
+                            <i class="fa-solid ${icon} text-[10px] text-white"></i>
+                        </div>
+                    </div>
+                    
+                    <h3 class="text-md font-bold text-[#003580] mb-2 leading-tight">${event.title}</h3>
+                    <p class="text-sm text-slate-600 mb-3 flex-grow">${event.summary}</p>
+                    
+                    <!-- Details Section -->
+                    <div class="mt-auto pt-3 border-t border-slate-100">
+                        <p class="text-xs text-slate-500 mb-2 italic">"${event.details}"</p>
+                        
+                        <!-- REAL DOCUMENT LINK -->
+                        <!-- href is now set to the actual filename. target="_blank" opens in new tab. -->
+                        <a href="${event.doc}" target="_blank" class="group/link flex items-center gap-2 text-[11px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 p-2 rounded transition-colors w-full justify-center">
+                            <i class="fa-solid fa-file-pdf"></i>
+                            <span class="group-hover/link:underline truncate max-w-[180px]">${event.doc}</span>
+                        </a>
+                    </div>
+                </div>
+            `;
+            
+            card.innerHTML = content;
+            timelineContainer.appendChild(card);
+        });
+    </script>
+</body>
+</html>
