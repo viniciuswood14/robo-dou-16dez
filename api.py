@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 17.4 (Limpeza de HTML Residual em Resumos)
+# Versão: 18.0 (Atualização PAC: Colunas P+D e %)
 
 from fastapi import FastAPI, Form, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,7 +49,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô DOU/Valor API - v17.4")
+app = FastAPI(title="Robô DOU/Valor API - v18.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,7 +61,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v17.4 - HTML Clean) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v18.0 - PAC P+D) <<<")
     try:
         if not os.path.exists(HISTORICAL_CACHE_PATH):
             asyncio.create_task(update_pac_historical_cache())
@@ -696,17 +696,36 @@ PROGRAMAS_ACOES_PAC = {
 
 async def buscar_dados_acao_pac(ano: int, acao_cod: str) -> Optional[Dict[str, Any]]:
     try:
-        df_detalhado = await asyncio.to_thread(despesa_detalhada, exercicio=ano, acao=acao_cod, inclui_descricoes=True, ignore_secure_certificate=True)
+        # Busca dados no orcamentobr
+        df_detalhado = await asyncio.to_thread(
+            despesa_detalhada, 
+            exercicio=ano, 
+            acao=acao_cod, 
+            inclui_descricoes=True, 
+            ignore_secure_certificate=True
+        )
+        
         if df_detalhado.empty: return None
-        cols_possiveis = ['loa', 'loa_mais_credito', 'empenhado', 'liquidado', 'pago', 'dotacao_disponivel', 'saldo_disponivel', 'saldo_dotacao']
+
+        # Adicionamos 'provisionado' e 'destaque' na lista de colunas a somar
+        cols_possiveis = [
+            'loa', 'loa_mais_credito', 'empenhado', 'liquidado', 'pago', 
+            'dotacao_disponivel', 'provisionado', 'destaque'
+        ]
+        
+        # Filtra apenas as colunas que existem no DataFrame retornado
         colunas = [c for c in cols_possiveis if c in df_detalhado.columns]
+        
         if not colunas: return None
+        
+        # Soma os valores
         totais = df_detalhado[colunas].sum().to_dict()
         totais['Acao_cod'] = acao_cod
-        if 'dotacao_disponivel' not in totais:
-             totais['dotacao_disponivel'] = totais.get('saldo_disponivel') or totais.get('saldo_dotacao') or 0.0
+        
         return totais
-    except: return None
+    except Exception as e:
+        print(f"Erro ao buscar dados PAC: {e}")
+        return None
  
 @app.get("/api/pac-data/historical-dotacao")
 async def get_pac_historical():
@@ -724,26 +743,74 @@ async def get_pac_data(ano: int = Path(..., ge=2010, le=2025)):
     tasks = []
     for prog, acoes in PROGRAMAS_ACOES_PAC.items():
         for acao in acoes.keys(): tasks.append(buscar_dados_acao_pac(ano, acao))
+    
     results = await asyncio.gather(*tasks)
     dados = [r for r in results if r]
+    
     if not dados: return []
 
     tabela = []
-    total = {'LOA':0,'DOTAÇÃO ATUAL':0,'DISPONÍVEL':0,'EMPENHADO (c)':0,'LIQUIDADO':0,'PAGO':0}
+    # Inicializa totais gerais
+    total_keys = ['DOTAÇÃO ATUAL', 'PROVISIONADO (P)', 'DESTAQUE (D)', 'P+D', 'EMPENHADO', 'PAGO']
+    total_geral = {k: 0.0 for k in total_keys}
+
     for prog, acoes in PROGRAMAS_ACOES_PAC.items():
-        soma = total.copy()
-        soma = {k:0 for k in total}
+        soma_prog = {k: 0.0 for k in total_keys}
         linhas = []
+        
         for cod, desc in acoes.items():
             row = next((d for d in dados if d.get('Acao_cod') == cod), None)
+            
             def gv(k): return float(row.get(k, 0.0)) if row else 0.0
-            vals = {'LOA':gv('loa'),'DOTAÇÃO ATUAL':gv('loa_mais_credito'),'DISPONÍVEL':gv('dotacao_disponivel'),'EMPENHADO (c)':gv('empenhado'),'LIQUIDADO':gv('liquidado'),'PAGO':gv('pago')}
+            
+            # Valores base
+            dot_atual = gv('loa_mais_credito')
+            prov = gv('provisionado')
+            dest = gv('destaque')
+            emp = gv('empenhado')
+            pago = gv('pago')
+            
+            # Cálculos derivados
+            pd = prov + dest
+            
+            # Monta linha
+            vals = {
+                'DOTAÇÃO ATUAL': dot_atual,
+                'PROVISIONADO (P)': prov,
+                'DESTAQUE (D)': dest,
+                'P+D': pd,
+                'EMPENHADO': emp,
+                'PAGO': pago
+            }
+            
+            # Cálculo da % (Empenhado / P+D)
+            percent = (emp / pd * 100) if pd > 0 else 0.0
+            vals['% EXEC (P+D)'] = percent
+
             linhas.append({'PROGRAMA': None, 'AÇÃO': f"{cod} - {desc}", **vals})
-            for k,v in vals.items(): soma[k]+=v
-        tabela.append({'PROGRAMA': prog, 'AÇÃO': None, **soma})
+            
+            # Soma no programa
+            for k in total_keys: soma_prog[k] += vals[k]
+
+        # Linha de total do Programa
+        # Recalcula % do programa
+        pd_prog = soma_prog['P+D']
+        perc_prog = (soma_prog['EMPENHADO'] / pd_prog * 100) if pd_prog > 0 else 0.0
+        soma_prog['% EXEC (P+D)'] = perc_prog
+        
+        tabela.append({'PROGRAMA': prog, 'AÇÃO': None, **soma_prog})
         tabela.extend(linhas)
-        for k,v in soma.items(): total[k]+=v
-    tabela.append({'PROGRAMA': 'Total Geral', 'AÇÃO': None, **total})
+        
+        # Soma no total geral
+        for k in total_keys: total_geral[k] += soma_prog[k]
+
+    # Linha Total Geral
+    pd_total = total_geral['P+D']
+    perc_total = (total_geral['EMPENHADO'] / pd_total * 100) if pd_total > 0 else 0.0
+    total_geral['% EXEC (P+D)'] = perc_total
+    
+    tabela.append({'PROGRAMA': 'Total Geral', 'AÇÃO': None, **total_geral})
+    
     return tabela
     
 @app.post("/api/admin/force-update-pac")
