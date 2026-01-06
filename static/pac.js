@@ -1,12 +1,11 @@
 document.addEventListener("DOMContentLoaded", function() {
 
-  // 👉 Aponte para a URL do seu backend no Render:
+  // 👉 Aponte para a URL do seu backend no Render se necessário:
   const API_BASE = "";
 
   const el = (id) => document.getElementById(id);
   const btnConsultar = el("btnConsultarPAC");
   const inputAno = el("ano");
-  const tableHeader = el("table-header");
   const tableBody = el("table-body");
   const tableContainer = el("table-container");
   const loadingText = el("loading-text");
@@ -25,7 +24,9 @@ document.addEventListener("DOMContentLoaded", function() {
   // --- Helpers de Formatação ---
   function formatCurrency(value) {
     if (typeof value !== 'number') return "R$ 0,00";
-    return "R$ " + value.toLocaleString('pt-BR', {
+    return value.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
@@ -33,7 +34,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
   function formatPercent(value) {
     if (typeof value !== 'number' || isNaN(value)) return "0,0%";
-    return (value * 100).toLocaleString('pt-BR', {
+    return value.toLocaleString('pt-BR', {
       minimumFractionDigits: 1,
       maximumFractionDigits: 1
     }) + "%";
@@ -48,13 +49,14 @@ document.addEventListener("DOMContentLoaded", function() {
       return;
     }
     
-    inputAno.value = ano;
+    // Atualiza o input se a chamada vier do clique no gráfico
+    if(inputAno.value !== ano) inputAno.value = ano;
 
     btnConsultar.disabled = true;
-    loadingText.textContent = `Consultando SIOP para ${ano}, aguarde...`;
+    loadingText.textContent = `Consultando SIOP para ${ano} (Calculando P+D)... aguarde...`;
     loadingText.style.display = "block";
     errorText.style.display = "none";
-    tableContainer.style.display = "none";
+    tableContainer.style.display = "none"; // Esconde tabela antiga enquanto carrega
 
     try {
       const response = await fetch(`${API_BASE}/api/pac-data/${ano}`);
@@ -64,81 +66,55 @@ document.addEventListener("DOMContentLoaded", function() {
         throw new Error(data.detail || `Erro HTTP ${response.status}`);
       }
 
-      // 1. Limpa a tabela antiga
-      tableHeader.innerHTML = "";
+      // 1. Limpa o corpo da tabela
       tableBody.innerHTML = "";
 
-      // 2. Define os cabeçalhos
-      // A última coluna foi renomeada para refletir a nova fórmula
-      const headersDisplay = [
-        'PROGRAMA', 'AÇÃO', 'LOA', 'DOTAÇÃO ATUAL', 
-        'DISPONÍVEL',  
-        'EMPENHADO (c)', 'LIQUIDADO', 'PAGO', 
-        'IND. (E-D)/E'
+      // 2. Preenche as linhas
+      // A ordem das chaves deve bater com o <thead> do HTML
+      const keys = [
+          'PROGRAMA', 
+          'AÇÃO', 
+          'DOTAÇÃO ATUAL', 
+          'PROVISIONADO (P)', 
+          'DESTAQUE (D)', 
+          'P+D', 
+          'EMPENHADO', 
+          'PAGO', 
+          '% EXEC (P+D)'
       ];
-      
-      headersDisplay.forEach(headerText => {
-        const th = document.createElement("th");
-        th.textContent = headerText;
-        if (headerText !== 'PROGRAMA' && headerText !== 'AÇÃO') {
-            th.classList.add("num");
-        }
-        tableHeader.appendChild(th);
-      });
 
-      // 3. Preenche as linhas da tabela
       data.forEach(rowData => {
         const tr = document.createElement("tr");
 
-        if (rowData.PROGRAMA === 'Total Geral') tr.classList.add("row-total");
-        else if (rowData.AÇÃO === null) tr.classList.add("row-programa");
-        else tr.classList.add("row-acao");
-
-        // Valores vindos da API
-        const dotacao = rowData['DOTAÇÃO ATUAL'] || 0;
-        const empenhado = rowData['EMPENHADO (c)'] || 0;
-        // Agora lemos o disponível direto da API, sem cálculo local
-        const disponivel = rowData['DISPONÍVEL'] || 0; 
-
-        // Cálculo da métrica solicitada: (Empenhado - Disponível) / Empenhado
-        let novoIndicador = 0;
-        if (empenhado !== 0) {
-            novoIndicador = (empenhado - disponivel) / empenhado;
+        // Define classes CSS para estilização (Total vs Programa vs Ação)
+        if (rowData.PROGRAMA === 'Total Geral') {
+            tr.classList.add("row-total");
+        } else if (rowData.AÇÃO === null) {
+            tr.classList.add("row-programa");
+        } else {
+            tr.classList.add("row-acao");
         }
 
-        // Monta o array na ordem das colunas
-        const valoresOrdenados = [
-            rowData['PROGRAMA'],
-            rowData['AÇÃO'],
-            rowData['LOA'],
-            dotacao,
-            disponivel, // Valor do SIOP
-            empenhado,
-            rowData['LIQUIDADO'],
-            rowData['PAGO'],
-            novoIndicador // Valor calculado
-        ];
-
-        valoresOrdenados.forEach((value, index) => {
+        keys.forEach((key) => {
             const td = document.createElement("td");
-            const headerName = headersDisplay[index];
+            const val = rowData[key];
 
-            if (headerName === 'PROGRAMA' || headerName === 'AÇÃO') {
-                td.textContent = value || "";
+            if (key === 'PROGRAMA' || key === 'AÇÃO') {
+                td.textContent = val || "";
             } 
-            else if (headerName === 'IND. (E-D)/E') {
-                td.textContent = formatPercent(value);
-                td.classList.add("num");
-                
-                // Destaque visual se negativo (opcional)
-                if (value < 0) {
-                    td.style.color = "#d9534f"; // Vermelho suave
-                    td.style.fontWeight = "bold";
+            else if (key === '% EXEC (P+D)') {
+                td.textContent = formatPercent(val);
+                td.style.fontWeight = "bold";
+                // Destaque visual: se execução for muito baixa (<10%) e não for linha de título
+                if (val < 10 && rowData.AÇÃO !== null) {
+                     td.style.color = "#d9534f"; // Vermelho
+                } else if (val > 90) {
+                     td.style.color = "#28a745"; // Verde
                 }
             } 
             else {
-                td.textContent = formatCurrency(value);
-                td.classList.add("num");
+                // Colunas numéricas monetárias
+                td.textContent = formatCurrency(val);
             }
             tr.appendChild(td);
         });
@@ -157,12 +133,11 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   }
 
-  // --- Função do Gráfico (Mantida igual) ---
+  // --- Função do Gráfico (Histórico) ---
   async function fetchAndRenderChart() {
-    loadingText.textContent = "Carregando gráfico histórico (2010-2025)...";
+    loadingText.textContent = "Carregando gráfico histórico...";
     loadingText.style.display = "block";
     errorText.style.display = "none";
-    tableContainer.style.display = "none";
     
     try {
       const response = await fetch(`${API_BASE}/api/pac-data/historical-dotacao`);
@@ -170,6 +145,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
       if (!response.ok) throw new Error(chartData.detail || `Erro HTTP ${response.status}`);
 
+      // Paleta de cores da Marinha/Defesa
       const colors = ['rgba(0, 44, 95, 0.8)', 'rgba(0, 95, 86, 0.8)', 'rgba(255, 184, 28, 0.8)', 'rgba(60, 120, 216, 0.8)', 'rgba(217, 83, 79, 0.8)'];
       
       chartData.datasets.forEach((dataset, index) => {
@@ -184,7 +160,12 @@ document.addEventListener("DOMContentLoaded", function() {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            title: { display: true, text: 'Dotação Autorizada (LOA + Créditos) por Ação e Ano', font: { size: 16, weight: '600' }, color: '#002c5f' },
+            title: { 
+                display: true, 
+                text: 'Histórico: Dotação Autorizada (LOA + Créditos)', 
+                font: { size: 16, weight: '600' }, 
+                color: '#002c5f' 
+            },
             legend: { position: 'top' },
             tooltip: {
                 callbacks: {
@@ -199,34 +180,50 @@ document.addEventListener("DOMContentLoaded", function() {
           },
           scales: {
             x: { stacked: true, title: { display: true, text: 'Exercício (Ano)' } },
-            y: { stacked: true, title: { display: true, text: 'Dotação (R$)' }, ticks: { callback: function(value) { return formatCurrency(value); } } }
+            y: { 
+                stacked: true, 
+                title: { display: true, text: 'Dotação (R$)' }, 
+                ticks: { callback: function(value) { return formatCurrency(value); } } 
+            }
           },
+          // Evento de Clique nas Barras
           onClick: (e) => {
             const activePoints = pacChart.getElementsAtEventForMode(e, 'index', { intersect: true }, true);
             if (activePoints.length > 0) {
                 const clickedIndex = activePoints[0].index;
                 const clickedYear = chartData.labels[clickedIndex];
+                // Carrega a tabela do ano clicado
                 fetchAndRenderTable(clickedYear);
             }
           }
         }
       });
       
-      const ultimoAno = chartData.labels[chartData.labels.length - 1];
-      fetchAndRenderTable(ultimoAno);
+      // Carrega automaticamente a tabela do último ano disponível no gráfico
+      if (chartData.labels && chartData.labels.length > 0) {
+          const ultimoAno = chartData.labels[chartData.labels.length - 1];
+          fetchAndRenderTable(ultimoAno);
+      } else {
+          // Fallback se o gráfico estiver vazio
+          fetchAndRenderTable(new Date().getFullYear());
+      }
 
     } catch (err) {
         if (err.message.includes("404")) {
-             errorText.textContent = "O robô ainda está compilando os dados históricos. Aguarde ou consulte a tabela abaixo.";
+             errorText.textContent = "Cache histórico ainda não gerado. Consulte a tabela abaixo manualmente.";
         } else {
-             errorText.textContent = `Erro ao carregar o gráfico: ${err.message}`;
+             errorText.textContent = `Erro ao carregar gráfico: ${err.message}`;
         }
         errorText.style.display = "block";
         loadingText.style.display = "none";
+        // Tenta carregar a tabela mesmo sem gráfico
         fetchAndRenderTable(new Date().getFullYear());
     }
   }
 
+  // Listeners
   btnConsultar.addEventListener("click", () => fetchAndRenderTable(inputAno.value));
+  
+  // Inicialização
   fetchAndRenderChart();
 });
