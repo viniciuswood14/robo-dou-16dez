@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual de Serviço - CORM</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a href="index.html" class="back-link">← Voltar para a Página Inicial</a>
+  <main class="card">
+    <header class="card-header">
+      <img src="logo-marinha.png" alt="Logotipo da Marinha do Brasil" class="logo" />
+      <h1>Manual de Serviço</h1>
+    </header>
+
+    <section class="manual-section">
+      <h2>Instruções para o Valor Econômico</h2>
+      <p>A edição impressa fica disponível de segunda a sexta, a partir das 05h.</p>
+      
+      <div class="credential-box">
+        <strong>Login de Acesso:</strong>
+        <div class="credential-field">
+          <input type="text" id="valor-user" value="" readonly>
+          <button onclick="copyToClipboard('valor-user')">Copiar</button>
+        </div>
+        <strong>Senha:</strong>
+        <div class="credential-field">
+          <input type="text" id="valor-pass" value="" readonly>
+          <button onclick="copyToClipboard('valor-pass')">Copiar</button>
+        </div>
+        <small><strong>Atenção:</strong> Use estas credenciais com responsabilidade.</small>
+      </div>
+
+      <h4>Checklist de Análise:</h4>
+      <ul>
+        <li>Acessar a <a href="https://valor.globo.com/impresso/" target="_blank" id="valor-link-manual">Edição Impressa do dia</a>.</li>
+        <li>Procurar por notícias referentes à situação fiscal, econômica e financeira do país.</li>
+        <li>Buscar por investimentos em construção naval ou defesa nacional pelo governo.</li>
+        <li>Identificar outros temas de interesse da Marinha do Brasil ou Ministério da Defesa.</li>
+        <li>Ao encontrar uma matéria, salvá-la em PDF.</li>
+        <li><strong>Atenção ao Salvar:</strong> Verificar se o cabeçalho do site não está cobrindo parte do texto. Limitar o número de páginas para evitar propagandas.</li>
+      </ul>
+      
+      <h4>Como Remover o Cabeçalho do Valor (se necessário):</h4>
+      <ol>
+        <li>Na página da notícia, clique com o botão direito e escolha "Inspecionar" (ou Inspect).</li>
+        <li>Na janela que abrir, procure pelo elemento de código que começa com <strong>&lt;header id="header"...&gt;</strong>.</li>
+        <li>Clique com o botão direito sobre essa linha de código e selecione "Deletar elemento" (ou Delete element).</li>
+        <li>O cabeçalho irá sumir, liberando o texto para impressão em PDF.</li>
+      </ol>
+    </section>
+
+    <section class="manual-section">
+      <h2>Instruções para o Diário Oficial da União (DOU)</h2>
+      <p>O serviço deve ser finalizado e publicado no WhatsApp até as **07h**, de segunda a sexta. Ficar atento a possíveis edições de fim de semana (o serviço é passado no domingo).</p>
+
+      <h4>Seção 1 - Foco Principal</h4>
+      <p>Buscar publicações que afetem a Marinha do Brasil / Defesa Nacional, com atenção especial às orçamentárias. A prioridade de leitura dos órgãos é:</p>
+      <table class="styled-table">
+        <thead>
+          <tr>
+            <th>Órgão/Poder</th>
+            <th>Prioridade e Observações</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Ministério da Fazenda</strong></td>
+            <td><strong>Sempre ler.</strong> Alta relevância orçamentária.</td>
+          </tr>
+          <tr>
+            <td><strong>Ministério do Planejamento e Orçamento</strong></td>
+            <td><strong>Sempre ler.</strong> Alta relevância orçamentária.</td>
+          </tr>
+           <tr>
+            <td><strong>Ministério da Defesa</strong></td>
+            <td><strong>Sempre ler.</strong> Relevância direta.</td>
+          </tr>
+          <tr>
+            <td><strong>Presidência da República</strong></td>
+            <td><strong>Sempre ler.</strong> Decretos, mensagens e atos de alto nível.</td>
+          </tr>
+          <tr>
+            <td><strong>Atos do Poder Executivo</strong></td>
+            <td><strong>Sempre ler.</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Ministério da Gestão e Inovação</strong></td>
+            <td>Recomendável ler. Buscar por EMGEPRON, AMAZUL e informações sobre o OI fiscal.</td>
+          </tr>
+           <tr>
+            <td><strong>Ministério do Desenv., Indústria e Comércio</strong></td>
+            <td>Recomendável ler. Foco em construção naval e indústria de defesa.</td>
+          </tr>
+          <tr>
+            <td><strong>Ministério da Ciência, Tecnologia e Inovação</strong></td>
+            <td>Recomendável ler.</td>
+          </tr>
+          <tr>
+            <td>Atos do Poder Judiciário</td>
+            <td>Bom ler. Foco em tribunais superiores e STM.</td>
+          </tr>
+        </tbody>
+      </table>
+      <br>
+      <h4>Seção 2 - Pessoal</h4>
+      <ul>
+        <li>Buscar publicações referentes a pessoas de interesse (conforme "listel" ou outras listas de acompanhamento).</li>
+      </ul>
+    </section>
+
+  </main>
+  <script>
+    // Script para atualizar o link do Valor Econômico para a data de hoje
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const valorLinkManual = document.getElementById('valor-link-manual');
+    valorLinkManual.href = `https://valor.globo.com/impresso/${year}${month}${day}/`;
+
+    // Função para copiar texto
+    function copyToClipboard(elementId) {
+      const input = document.getElementById(elementId);
+      input.select();
+      input.setSelectionRange(0, 99999); // Para mobile
+      document.execCommand("copy");
+      alert("Copiado para a área de transferência!");
+    }
+  </script>
+</body>
+</html>

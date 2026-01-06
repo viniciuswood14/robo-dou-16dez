@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+httpx
+beautifulsoup4
+lxml
+python-multipart
+google-generativeai
+pandas
+numpy
+orcamentobr
+requests
+pydantic

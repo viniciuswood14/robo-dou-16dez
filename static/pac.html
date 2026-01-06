@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard PAC - CORM</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  
+  <script src="chart.js"></script>
+  
+  <style>
+    /* Estilos específicos para a tabela do PAC */
+    .table-container {
+      width: 100%;
+      overflow-x: auto; /* Permite rolagem horizontal em telas pequenas */
+      margin-top: 24px;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+    }
+    .pac-table {
+      width: 100%;
+      min-width: 800px; /* Largura mínima para não quebrar as colunas */
+      border-collapse: collapse;
+    }
+    .pac-table th, .pac-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .pac-table th {
+      background-color: var(--steel-gray);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--navy-blue);
+    }
+    .pac-table td {
+      font-size: 14px;
+      font-family: "Courier New", Courier, monospace;
+    }
+    .pac-table td:first-child, .pac-table td:nth-child(2) {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .pac-table tr:last-child {
+      border-bottom: none;
+    }
+    
+    /* Linhas de Agrupamento */
+    .row-programa {
+      background-color: #DDEBF7;
+      font-weight: bold;
+      color: var(--navy-blue);
+    }
+    .row-total {
+      background-color: #002060;
+      color: white;
+      font-weight: bold;
+      font-size: 15px;
+    }
+    .row-acao td:first-child {
+        padding-left: 30px; /* Indentação da Ação */
+    }
+    
+    /* Alinhamento de números */
+    .pac-table .num {
+        text-align: right;
+    }
+
+    /* Estilo para o container do gráfico */
+    .chart-container {
+      position: relative;
+      height: 450px; /* Altura do gráfico */
+      width: 100%;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+  </style>
+</head>
+<body>
+  <a href="index.html" class="back-link">← Voltar para a Página Inicial</a>
+  <main class="card">
+    <header class="card-header">
+      <img src="logo-marinha.png" alt="Logotipo da Marinha do Brasil" class="logo" />
+      <h1>Dashboard de Execução do PAC</h1>
+    </header>
+
+    <div class="chart-container">
+      <canvas id="pacChart"></canvas>
+    </div>
+    
+    <p class="hint" style="text-align: center; margin-top: -40px; margin-bottom: 24px;">
+      Clique em um ano no gráfico acima para ver a tabela detalhada de execução.
+    </p>
+
+    <div class="row" style="max-width: 200px;">
+      <label for="ano">Selecione o Ano</label>
+      <input id="ano" type="number" value="2025" />
+    </div>
+
+    <div class="actions">
+      <button id="btnConsultarPAC">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        Consultar SIOP
+      </button>
+    </div>
+    
+    <p id="loading-text" class="hint" style="display: none; font-style: italic;">Consultando SIOP, isso pode levar alguns segundos...</p>
+
+    <div id="table-container" class="table-container" style="display: none;">
+        <table class="pac-table">
+            <thead>
+                <tr id="table-header">
+                    </tr>
+            </thead>
+            <tbody id="table-body">
+                </tbody>
+        </table>
+    </div>
+    <div id="error-text" class="preview" style="display: none; white-space: pre-wrap;"></div>
+
+  </main>
+
+  <script src="pac.js"></script>
+</body>
+</html>

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Legislativo - CORM</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <style>
+    /* Estilos anteriores mantidos... */
+    .leg-card {
+      border-left: 5px solid #ccc;
+      padding: 15px;
+      margin-bottom: 15px;
+      background-color: #fff;
+      border-radius: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: transform 0.2s;
+    }
+    .leg-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+    .leg-camara { border-left-color: #28a745; }
+    .leg-senado { border-left-color: #0056b3; }
+    .leg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .leg-badge { font-size: 0.75em; padding: 3px 8px; border-radius: 12px; color: white; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+    .bg-camara { background-color: #28a745; }
+    .bg-senado { background-color: #0056b3; }
+    .filter-container { display: flex; gap: 15px; margin-bottom: 20px; align-items: center; justify-content: center; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid var(--border-color); }
+    select, input[type="text"], input[type="number"] { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; font-size: 15px; }
+    .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--navy-blue); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; display: none; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    .watchlist-section { background-color: #f1f3f5; border-radius: 8px; padding: 20px; margin-bottom: 30px; border: 1px solid #dee2e6; }
+    .watchlist-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #dee2e6; }
+    .status-box { background: #e9ecef; padding: 10px; border-radius: 4px; font-size: 0.9em; margin-top: 10px; border-left: 3px solid #6c757d; }
+
+    /* Novo estilo para o formulário manual */
+    .manual-add-box {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+        margin-bottom: 15px;
+    }
+    .manual-form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr 1fr auto;
+        gap: 10px;
+        align-items: end;
+    }
+    @media (max-width: 700px) {
+        .manual-form-grid { grid-template-columns: 1fr 1fr; }
+        .manual-form-grid button { grid-column: span 2; }
+    }
+  </style>
+</head>
+<body>
+  <a href="index.html" class="back-link">← Voltar para a Página Inicial</a>
+  <main class="card">
+    <header class="card-header">
+      <img src="logo-marinha.png" alt="Logotipo da Marinha do Brasil" class="logo" />
+      <h1>Monitoramento Legislativo</h1>
+    </header>
+
+    <section id="watchlist-section" class="watchlist-section">
+        <div class="watchlist-header">
+            <h3 style="margin: 0; color: var(--navy-blue);">📌 Projetos em Acompanhamento</h3>
+            <button id="btnRefreshWatchlist" style="font-size: 13px; padding: 6px 12px; background-color: var(--navy-blue); border: none;">
+                🔄 Atualizar Tramitações
+            </button>
+        </div>
+
+        <details style="margin-bottom: 15px;">
+            <summary style="font-size: 14px; color: var(--navy-blue); font-weight: 600;">+ Adicionar Projeto Manualmente</summary>
+            <div class="manual-add-box">
+                <p class="hint" style="margin-top:0">Informe os dados exatos para localizar o projeto na API oficial.</p>
+                <div class="manual-form-grid">
+                    <div>
+                        <label style="font-size:12px;">Casa</label>
+                        <select id="manCasa" style="width:100%">
+                            <option value="Câmara">Câmara</option>
+                            <option value="Senado">Senado</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;">Sigla (Ex: PL, PEC)</label>
+                        <input type="text" id="manSigla" placeholder="PL" style="width:100%">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;">Número</label>
+                        <input type="number" id="manNumero" placeholder="1234" style="width:100%">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;">Ano</label>
+                        <input type="number" id="manAno" value="2024" style="width:100%">
+                    </div>
+                    <button id="btnAddManual" style="padding: 9px 15px; background-color: #28a745; border: none; font-size: 13px;">Adicionar</button>
+                </div>
+            </div>
+        </details>
+        
+        <div id="watchlist-container">
+            <p class="hint" style="text-align: center;">Carregando seus projetos...</p>
+        </div>
+    </section>
+
+    <h3 style="margin-top: 0; color: var(--navy-blue);">🔎 Busca de Novas Proposições</h3>
+    <div class="filter-container">
+        <label for="daysSelect"><strong>Período:</strong></label>
+        <select id="daysSelect">
+            <option value="5" selected>Últimos 5 dias</option>
+            <option value="15">Últimos 15 dias</option>
+            <option value="30">Últimos 30 dias</option>
+        </select>
+    </div>
+
+    <div class="actions" style="justify-content: center;">
+      <button id="btnLegislativo" style="background-color: #4a4e69; border-color: #4a4e69; width: 100%; max-width: 400px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4 8 4v14"/><path d="M8 21v-9a4 4 0 1 1 8 0v9"/></svg>
+        Verificar Câmara e Senado Agora
+      </button>
+    </div>
+
+    <div id="leg-container" style="margin-top: 20px;">
+        <div id="loading-spinner" class="spinner"></div>
+        <p id="leg-status" class="hint" style="text-align: center;">Selecione o período e clique para iniciar a varredura.</p>
+        <div id="leg-results"></div>
+    </div>
+
+  </main>
+
+  <script>
+      const API_BASE = ""; 
+
+      const btn = document.getElementById("btnLegislativo");
+      const select = document.getElementById("daysSelect");
+      const resultsDiv = document.getElementById("leg-results");
+      const statusMsg = document.getElementById("leg-status");
+      const spinner = document.getElementById("loading-spinner");
+      const watchlistContainer = document.getElementById("watchlist-container");
+      const btnRefreshWL = document.getElementById("btnRefreshWatchlist");
+      
+      // Inputs Manual
+      const btnAddManual = document.getElementById("btnAddManual");
+      const manCasa = document.getElementById("manCasa");
+      const manSigla = document.getElementById("manSigla");
+      const manNumero = document.getElementById("manNumero");
+      const manAno = document.getElementById("manAno");
+
+      // --- 1. Adição Manual ---
+      btnAddManual.addEventListener("click", async () => {
+        const casa = manCasa.value;
+        const sigla = manSigla.value.trim();
+        const numero = manNumero.value.trim();
+        const ano = manAno.value.trim();
+
+        if(!sigla || !numero || !ano) {
+            alert("Preencha Sigla, Número e Ano.");
+            return;
+        }
+
+        btnAddManual.disabled = true;
+        btnAddManual.textContent = "...";
+
+        try {
+            const res = await fetch(API_BASE + "/legislativo/add-manual", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ casa, sigla, numero, ano })
+            });
+            const json = await res.json();
+
+            if (json.status === "ok") {
+                alert(json.message);
+                loadWatchlist(); // Recarrega a lista
+                // Limpa campos
+                manNumero.value = "";
+            } else {
+                alert("Erro: " + json.message);
+            }
+        } catch(e) {
+            alert("Erro de comunicação: " + e.message);
+        } finally {
+            btnAddManual.disabled = false;
+            btnAddManual.textContent = "Adicionar";
+        }
+      });
+
+      // --- 2. Lógica da Watchlist ---
+      async function loadWatchlist() {
+        watchlistContainer.innerHTML = '<div class="spinner" style="display:block"></div>';
+        try {
+            const res = await fetch(API_BASE + "/legislativo/watchlist");
+            const items = await res.json();
+            watchlistContainer.innerHTML = "";
+            
+            if (!items || items.length === 0) {
+                watchlistContainer.innerHTML = '<p class="hint" style="text-align: center;">Nenhum projeto monitorado.</p>';
+                return;
+            }
+
+            items.forEach(item => {
+                const badgeClass = item.casa === "Câmara" ? "bg-camara" : "bg-senado";
+                const borderClass = item.casa === "Câmara" ? "leg-camara" : "leg-senado";
+                const numDisplay = `${item.sigla} ${item.numero}/${item.ano}`;
+
+                const card = document.createElement("div");
+                card.className = `leg-card ${borderClass}`;
+                card.style.backgroundColor = "#fff";
+                card.innerHTML = `
+                    <div class="leg-header">
+                        <div>
+                            <span class="leg-badge ${badgeClass}">${item.casa}</span>
+                            <strong style="margin-left: 8px; font-size: 1.1em;">${numDisplay}</strong>
+                        </div>
+                        <button onclick='toggleTrack(${JSON.stringify(item)})' style="background: #dc3545; border: none; padding: 4px 10px; font-size: 11px; border-radius: 4px; color: white; cursor: pointer;">Parar de Seguir</button>
+                    </div>
+                    <div style="font-size: 13px; color: #555; margin: 8px 0; font-style: italic;">
+                        ${(item.ementa || "Sem ementa").substring(0, 120)}...
+                    </div>
+                    <div class="status-box">
+                        <strong style="color: #333;">Última Movimentação:</strong><br>
+                        ${item.last_status || "Ainda não verificado."}
+                    </div>
+                    <div style="text-align: right; margin-top: 8px;">
+                        <a href="${item.link}" target="_blank" style="font-size: 12px; font-weight: 500; color: var(--navy-blue); text-decoration: underline;">Abrir Fonte Oficial ↗</a>
+                    </div>
+                `;
+                watchlistContainer.appendChild(card);
+            });
+        } catch (e) {
+            watchlistContainer.innerHTML = `<p style="color:red; text-align:center;">Erro ao carregar monitoramento.</p>`;
+        }
+      }
+
+      async function toggleTrack(itemData) {
+        // Lógica de toggle igual à anterior...
+        const id_api = itemData.id_api || (itemData.uid ? itemData.uid.split('_')[1] : null) || itemData.id;
+        const prefix = itemData.casa === "Câmara" ? "CAM_" : "SEN_";
+        const finalUid = itemData.uid || (prefix + id_api);
+
+        const payload = {
+            uid: finalUid, casa: itemData.casa, tipo: itemData.tipo || itemData.sigla,
+            numero: String(itemData.numero), ano: String(itemData.ano),
+            ementa: itemData.ementa, link: itemData.link
+        };
+
+        if(!confirm(`Remover ${payload.tipo} ${payload.numero}/${payload.ano} do monitoramento?`)) return;
+
+        try {
+            const res = await fetch(API_BASE + "/legislativo/track", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if(json.status === "ok") {
+                loadWatchlist();
+            }
+        } catch (e) { alert("Erro: " + e.message); }
+      }
+
+      btnRefreshWL.addEventListener("click", async function() {
+        this.disabled = true;
+        this.textContent = "Verificando...";
+        try {
+            const res = await fetch(API_BASE + "/legislativo/force-update", { method: "POST" });
+            const data = await res.json();
+            alert(`Atualização concluída!\n${data.updates_found} novidades encontradas.`);
+            await loadWatchlist();
+        } catch(e) { alert("Erro: " + e.message); } 
+        finally { this.disabled = false; this.textContent = "🔄 Atualizar Tramitações"; }
+      });
+
+      // --- 3. Lógica da Busca Geral ---
+      btn.addEventListener("click", async () => {
+        const days = select.value; 
+        btn.disabled = true; btn.innerHTML = `Processando...`;
+        resultsDiv.innerHTML = ""; statusMsg.style.display = "block"; spinner.style.display = "block";
+
+        try {
+            const formData = new FormData(); formData.append('days', days);
+            const res = await fetch(API_BASE + "/processar-legislativo", { method: "POST", body: formData });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.detail);
+
+            spinner.style.display = "none";
+            if (json.count === 0) {
+                statusMsg.textContent = ""; 
+                resultsDiv.innerHTML = `<div class="preview" style="text-align: center;">✅ ${json.message}</div>`;
+            } else {
+                statusMsg.style.display = "none"; 
+                let html = `<div class="preview" style="background: #e8f5e9; color: #1b5e20; margin-bottom: 15px; border-left: 4px solid #28a745;">✅ <b>Concluído:</b> ${json.message}</div>`;
+                
+                json.data.forEach(p => {
+                    const safeItem = JSON.stringify(p).replace(/'/g, "&#39;");
+                    html += `
+                    <div class="leg-card ${p.casa === "Câmara" ? "leg-camara" : "leg-senado"}">
+                        <div class="leg-header">
+                            <div><span class="leg-badge ${p.casa === "Câmara" ? "bg-camara" : "bg-senado"}">${p.casa}</span>
+                            <small style="color: #666; font-weight: bold; margin-left:5px;">${p.tipo} ${p.numero}/${p.ano}</small></div>
+                            <small style="color: #999;">${p.data ? p.data.slice(0,10) : ''}</small>
+                        </div>
+                        <div style="font-size: 0.9em; color: #555; margin-bottom: 8px;"><strong>Tema:</strong> <span style="background-color: #fff3cd; padding: 2px 5px; border-radius: 3px;">${p.keyword}</span></div>
+                        <p style="font-size: 14px; margin-bottom: 12px; color: #212529;">${p.ementa || "Sem ementa."}</p>
+                        <div style="text-align: right; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick='toggleTrack(${safeItem})' style="font-size: 13px; background-color: #ffc107; color: #212529; border: 1px solid #e0a800; padding: 4px 10px; border-radius: 4px; cursor: pointer;">⭐ Monitorar</button>
+                            <a href="${p.link}" target="_blank" style="font-size: 13px; font-weight: bold; color: var(--navy-blue); text-decoration: none; border: 1px solid var(--navy-blue); padding: 4px 8px; border-radius: 4px;">🔗 Inteiro Teor</a>
+                        </div>
+                    </div>`;
+                });
+                resultsDiv.innerHTML = html;
+            }
+        } catch (err) {
+            spinner.style.display = "none"; statusMsg.style.display = "block"; statusMsg.style.color = "red"; statusMsg.textContent = `❌ Erro: ${err.message}`;
+        } finally {
+            btn.disabled = false; btn.innerHTML = `Verificar Câmara e Senado Agora`;
+        }
+      });
+
+      loadWatchlist();
+  </script>
+</body>
+</html>
