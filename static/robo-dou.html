@@ -44,14 +44,17 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2"/><path d="M8 6h8"/><path d="M8 10h8"/><path d="M8 14h4"/></svg>
         Analisar Valor (IA)
       </button>
-      </div>
+    </div>
 
-      <div class="actions" style="margin-top: 10px;">
-        <button id="btnTesteFallback" style="background-color: #6c757d; border-color: #6c757d;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-            Testar Fallback (Site Público)
-        </button>
-      </div>
+    <div class="actions" style="margin-top: 10px;">
+        <a href="https://chatgpt.com/g/g-695b02c6bff0819197bcaedb520ccbc6-dou-completo" 
+           target="_blank" 
+           class="action-btn"
+           style="background-color: #10a37f; border-color: #10a37f; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0.75rem; border-radius: 4px; font-weight: 500; transition: background-color 0.2s;">
+           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+           Análise pelo ChatGPT
+        </a>
+    </div>
     
     <div class="actions" style="margin-top: 10px;">
         <button id="btnCopiar" disabled>Copiar Relatório</button>
@@ -60,7 +63,7 @@
     <p class="hint" style="margin-top: -10px; margin-bottom: 20px;">
       <b>DOU (Rápido):</b> Apenas filtra o DOU por palavras-chave.<br>
       <b>DOU (IA):</b> Filtra o DOU e usa IA para analisar o impacto.<br>
-      <b>Testar Fallback:</b> Simula erro no InLabs e busca direto no site público (in.gov.br).
+      <b>Análise ChatGPT:</b> Abre o seu GPT personalizado para uma análise aprofundada dos textos.
     </p>
 
     <pre id="preview" class="preview" aria-live="polite">Aguardando comando...</pre>
