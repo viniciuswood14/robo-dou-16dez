@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const btnProcessar = el("btnProcessar");
   const btnProcessarIA = el("btnProcessarIA");
   const btnProcessarValor = el("btnProcessarValor");
-  const btnTesteFallback = el("btnTesteFallback");
+  // Removido: const btnTesteFallback... (pois agora é um link externo)
   const btnCopiar = el("btnCopiar");
   const preview = el("preview");
 
@@ -37,8 +37,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
     // Adiciona campos específicos do DOU
     if (endpoint.startsWith("/processar-dou") || 
-        endpoint.startsWith("/processar-inlabs") || 
-        endpoint.startsWith("/teste-fallback")) {
+        endpoint.startsWith("/processar-inlabs")) {
       
       fd.append("sections", sections);
       
@@ -52,9 +51,7 @@ document.addEventListener("DOMContentLoaded", function() {
         }
       }
       
-      if(endpoint.includes("fallback")) {
-         loadingText = "Testando busca no DOU Público (in.gov.br)... isso pode levar até 1 min.";
-      } else if(endpoint.includes("-ia")) {
+      if(endpoint.includes("-ia")) {
         loadingText = "Processando DOU com IA no INLABS. Isso pode levar até 2 minutos, aguarde…";
       } else {
         loadingText = "Processando DOU (Rápido) no INLABS, aguarde…";
@@ -66,11 +63,10 @@ document.addEventListener("DOMContentLoaded", function() {
         loadingText = "Buscando notícias no Valor Econômico e analisando com IA, aguarde…";
     }
 
-
+    // Desabilita botões durante o processamento
     if (btnProcessar) btnProcessar.disabled = true;
     if (btnProcessarIA) btnProcessarIA.disabled = true;
     if (btnProcessarValor) btnProcessarValor.disabled = true;
-    if (btnTesteFallback) btnTesteFallback.disabled = true;
     if (btnCopiar) btnCopiar.disabled = true;
 
     if (preview) {
@@ -103,7 +99,6 @@ document.addEventListener("DOMContentLoaded", function() {
       if (btnProcessar) btnProcessar.disabled = false;
       if (btnProcessarIA) btnProcessarIA.disabled = false;
       if (btnProcessarValor) btnProcessarValor.disabled = false;
-      if (btnTesteFallback) btnTesteFallback.disabled = false;
       if (preview) preview.classList.remove("loading");
     }
   }
@@ -118,9 +113,8 @@ document.addEventListener("DOMContentLoaded", function() {
   if (btnProcessarValor) {
     btnProcessarValor.addEventListener("click", () => handleProcessing("/processar-valor-ia"));
   }
-  if (btnTesteFallback) {
-    btnTesteFallback.addEventListener("click", () => handleProcessing("/teste-fallback"));
-  }
+  
+  // O Listener do btnTesteFallback foi removido pois agora é um link HTML padrão.
 
   // Botão Copiar (Atualizado com Feedback Visual)
   if (btnCopiar) {
