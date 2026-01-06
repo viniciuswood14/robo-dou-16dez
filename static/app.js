@@ -4,11 +4,15 @@ document.addEventListener("DOMContentLoaded", function() {
   const API_BASE = "";
 
   const el = (id) => document.getElementById(id);
+  
+  // Elementos (Botões)
   const btnProcessar = el("btnProcessar");
   const btnProcessarIA = el("btnProcessarIA");
   const btnProcessarValor = el("btnProcessarValor");
-  // Removido: const btnTesteFallback... (pois agora é um link externo)
+  const btnBaixarPdf = el("btnBaixarPdf"); // Novo botão para o PDF
   const btnCopiar = el("btnCopiar");
+  
+  // Elementos (Inputs/Output)
   const preview = el("preview");
 
   // Valor padrão: hoje
@@ -19,7 +23,34 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   })();
 
-  // Função central de processamento
+  // --- 1. Lógica do Botão PDF (Site Oficial) ---
+  if (btnBaixarPdf) {
+    btnBaixarPdf.addEventListener("click", () => {
+      const dataVal = el("data").value; // Vem como YYYY-MM-DD
+      
+      if (!dataVal) {
+        alert("Por favor, informe a data (YYYY-MM-DD) antes de abrir o PDF.");
+        return;
+      }
+
+      // Validação e conversão de formato
+      const parts = dataVal.split("-");
+      if (parts.length !== 3) {
+        alert("Data inválida.");
+        return;
+      }
+      
+      const [ano, mes, dia] = parts;
+      // O site do governo usa DD-MM-YYYY
+      const dataFormatada = `${dia}-${mes}-${ano}`;
+
+      // Abre a URL oficial da Seção 1 em nova aba
+      const url = `https://www.in.gov.br/leitura-jornal?data=${dataFormatada}&secao=do1`;
+      window.open(url, "_blank");
+    });
+  }
+
+  // --- 2. Função central de processamento (Backend) ---
   async function handleProcessing(endpoint) {
     const data = el("data").value.trim();
     const sections = el("sections").value.trim() || "DO1,DO2";
@@ -35,7 +66,7 @@ document.addEventListener("DOMContentLoaded", function() {
     
     let loadingText = "Processando, aguarde…";
 
-    // Adiciona campos específicos do DOU
+    // Configuração para rotas do DOU
     if (endpoint.startsWith("/processar-dou") || 
         endpoint.startsWith("/processar-inlabs")) {
       
@@ -58,16 +89,17 @@ document.addEventListener("DOMContentLoaded", function() {
       }
     }
     
-    // Texto específico do Valor
+    // Configuração para rota do Valor
     if (endpoint.startsWith("/processar-valor")) {
         loadingText = "Buscando notícias no Valor Econômico e analisando com IA, aguarde…";
     }
 
-    // Desabilita botões durante o processamento
+    // Desabilita botões que dependem do backend durante o processamento
     if (btnProcessar) btnProcessar.disabled = true;
     if (btnProcessarIA) btnProcessarIA.disabled = true;
     if (btnProcessarValor) btnProcessarValor.disabled = true;
     if (btnCopiar) btnCopiar.disabled = true;
+    // Nota: O btnBaixarPdf não é desabilitado pois não depende do backend
 
     if (preview) {
       preview.classList.add("loading");
@@ -95,7 +127,7 @@ document.addEventListener("DOMContentLoaded", function() {
     } catch (err) {
       if (preview) preview.textContent = `Falha na requisição: ${err.message || err}`;
     } finally {
-      
+      // Reabilita botões
       if (btnProcessar) btnProcessar.disabled = false;
       if (btnProcessarIA) btnProcessarIA.disabled = false;
       if (btnProcessarValor) btnProcessarValor.disabled = false;
@@ -103,7 +135,7 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   }
 
-  // Listeners dos botões
+  // --- 3. Listeners dos botões de processamento ---
   if (btnProcessar) {
     btnProcessar.addEventListener("click", () => handleProcessing("/processar-inlabs"));
   }
@@ -114,24 +146,23 @@ document.addEventListener("DOMContentLoaded", function() {
     btnProcessarValor.addEventListener("click", () => handleProcessing("/processar-valor-ia"));
   }
   
-  // O Listener do btnTesteFallback foi removido pois agora é um link HTML padrão.
-
-  // Botão Copiar (Atualizado com Feedback Visual)
+  // --- 4. Botão Copiar (Com feedback visual) ---
   if (btnCopiar) {
     btnCopiar.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(preview.textContent || "");
         
-        // Feedback Visual: Pisca a caixa em verde
+        // Feedback Visual na caixa de texto (pisca verde)
         preview.style.backgroundColor = "#d4edda"; 
         preview.style.transition = "background-color 0.2s";
         setTimeout(() => {
             preview.style.backgroundColor = ""; 
         }, 300);
 
-        // Feedback no Botão
+        // Feedback no Texto do Botão
+        const originalText = btnCopiar.textContent;
         btnCopiar.textContent = "Copiado!";
-        setTimeout(() => (btnCopiar.textContent = "Copiar Relatório"), 1200);
+        setTimeout(() => (btnCopiar.textContent = originalText), 1200);
       } catch (err) {
         alert("Falha ao copiar para a área de transferência.");
       }
