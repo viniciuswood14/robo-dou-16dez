@@ -10,22 +10,31 @@
   <script src="chart.js"></script>
   
   <style>
+    /* Layout Fluido para Dashboard */
+    body {
+        /* Garante que o fundo cubra tudo */
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
     /* Estilos específicos para a tabela do PAC */
     .table-container {
       width: 100%;
-      overflow-x: auto; /* Permite rolagem horizontal em telas pequenas */
+      overflow-x: auto; /* Permite rolagem horizontal se necessário */
       margin-top: 24px;
       border: 1px solid var(--border-color);
       border-radius: 8px;
+      box-shadow: inset 0 0 10px rgba(0,0,0,0.05); /* Sombra interna sutil */
     }
     .pac-table {
       width: 100%;
-      min-width: 1100px; /* Aumentado para caber as novas colunas sem quebrar */
+      min-width: 1200px; /* Garante que não quebre em telas médias */
       border-collapse: collapse;
     }
     .pac-table th, .pac-table td {
-      padding: 10px 8px; /* Reduzi levemente o padding lateral */
-      text-align: right; /* Padrão: alinhado à direita (números) */
+      padding: 12px 10px; /* Mais espaçamento para leitura */
+      text-align: right;
       border-bottom: 1px solid var(--border-color);
     }
     
@@ -37,50 +46,50 @@
 
     .pac-table th {
       background-color: var(--steel-gray);
-      font-size: 12px; /* Fonte levemente menor para caber tudo */
-      font-weight: 600;
+      font-size: 13px;
+      font-weight: 700;
       color: var(--navy-blue);
       text-transform: uppercase;
       vertical-align: middle;
+      white-space: nowrap; /* Cabeçalho em uma linha só */
     }
     .pac-table td {
-      font-size: 13px;
+      font-size: 14px;
       font-family: "Courier New", Courier, monospace;
-      white-space: nowrap; /* Evita quebra de linha nos valores */
+      white-space: nowrap;
     }
     
-    /* Fontes normais para Programa e Ação */
     .pac-table td:nth-child(1), .pac-table td:nth-child(2) {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      white-space: normal; /* Permite quebra de linha no nome da ação */
+      white-space: normal;
     }
 
-    .pac-table tr:last-child {
-      border-bottom: none;
-    }
+    .pac-table tr:last-child { border-bottom: none; }
     
     /* Linhas de Agrupamento */
     .row-programa {
-      background-color: #DDEBF7;
+      background-color: #e9ecef;
       font-weight: bold;
       color: var(--navy-blue);
     }
     .row-total {
-      background-color: #002060;
+      background-color: #002c5f;
       color: white;
       font-weight: bold;
-      font-size: 14px;
+      font-size: 15px;
     }
     .row-acao td:nth-child(2) {
-        padding-left: 20px; /* Indentação visual da Ação */
-        color: #555;
+        padding-left: 20px;
+        color: #444;
     }
     
-    /* Estilo para o container do gráfico */
+    /* Container do Gráfico Responsivo */
     .chart-container {
       position: relative;
-      height: 400px; /* Altura ajustada */
       width: 100%;
+      height: 50vh; /* Ocupa 50% da altura da tela */
+      min-height: 350px; /* Mas nunca menos que 350px */
+      max-height: 600px; /* Nem mais que 600px */
       margin-bottom: 32px;
       padding-bottom: 24px;
       border-bottom: 1px solid var(--border-color);
@@ -88,41 +97,48 @@
   </style>
 </head>
 <body>
-  <a href="index.html" class="back-link">← Voltar para a Página Inicial</a>
-  <main class="card" style="max-width: 1300px;"> <header class="card-header">
-      <img src="logo-marinha.png" alt="Logotipo da Marinha do Brasil" class="logo" />
-      <h1>Dashboard de Execução do PAC</h1>
+  
+  <main class="card" style="width: 96%; max-width: 100%; margin: 20px auto;">
+    
+    <header class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <div style="display: flex; align-items: center; gap: 15px;">
+          <img src="logo-marinha.png" alt="Logotipo da Marinha do Brasil" class="logo" />
+          <h1>Dashboard de Execução do PAC</h1>
+      </div>
+      <a href="index.html" class="back-link" style="margin: 0;">← Voltar ao Menu</a>
     </header>
 
     <div class="chart-container">
       <canvas id="pacChart"></canvas>
     </div>
     
-    <p class="hint" style="text-align: center; margin-top: -40px; margin-bottom: 24px;">
-      Clique em um ano no gráfico acima para ver a tabela detalhada de execução.
+    <p class="hint" style="text-align: center; margin-top: -30px; margin-bottom: 24px;">
+      Clique em uma barra do gráfico para carregar a tabela detalhada daquele ano.
     </p>
 
-    <div class="row" style="align-items: flex-end; gap: 10px;">
-        <div>
-          <label for="ano">Selecione o Ano</label>
-          <input id="ano" type="number" value="2025" min="2010" max="2030" />
+    <div class="row" style="align-items: flex-end; gap: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #dee2e6;">
+        <div style="flex-grow: 0;">
+          <label for="ano" style="font-weight: bold; color: var(--navy-blue);">Selecione o Exercício:</label>
+          <input id="ano" type="number" value="2025" min="2010" max="2030" style="padding: 8px; font-size: 16px; width: 100px;" />
         </div>
         
         <div class="actions" style="margin: 0;">
-          <button id="btnConsultarPAC">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-            Consultar SIOP
+          <button id="btnConsultarPAC" style="padding: 10px 20px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+            Carregar Dados
           </button>
         </div>
+        
+        <div style="flex-grow: 1; text-align: right;">
+             <span id="loading-text" style="display: none; font-style: italic; color: #666;">Processando dados do arquivo CSV...</span>
+        </div>
     </div>
-    
-    <p id="loading-text" class="hint" style="display: none; font-style: italic; margin-top: 10px;">Consultando SIOP, isso pode levar alguns segundos...</p>
 
     <div id="table-container" class="table-container" style="display: none;">
         <table id="tabelaPac" class="pac-table">
             <thead>
                 <tr>
-                    <th style="width: 10%;">PROGRAMA</th>
+                    <th style="width: 12%;">PROGRAMA</th>
                     <th style="width: 25%;">AÇÃO</th>
                     <th>DOTAÇÃO ATUAL</th>
                     <th>PROV. (P)</th>
@@ -138,8 +154,7 @@
         </table>
     </div>
     
-    <p id="pacStatus" class="hint" style="margin-top: 10px;"></p>
-    <div id="error-text" class="preview" style="display: none; white-space: pre-wrap; color: red;"></div>
+    <div id="error-text" class="preview" style="display: none; white-space: pre-wrap; color: #721c24; background-color: #f8d7da; border-color: #f5c6cb; margin-top: 20px;"></div>
 
   </main>
 
