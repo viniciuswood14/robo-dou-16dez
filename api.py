@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 19.0 (Fonte de Dados PAC via CSV - Performance Máxima)
+# Versão: 19.1 (Correção de Leitura CSV: Formatação Numérica e Headers)
 
 from fastapi import FastAPI, Form, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 # IA / Gemini
 import google.generativeai as genai
 
+# Tenta importar módulos opcionais
 try:
     from google_search import perform_google_search, SearchResult
 except ImportError:
@@ -42,7 +43,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô DOU/Valor API - v19.0")
+app = FastAPI(title="Robô DOU/Valor API - v19.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,18 +55,16 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v19.0 - PAC CSV) <<<")
-    # Carrega dados do PAC na memória ao iniciar
+    print(">>> SISTEMA UNIFICADO INICIADO (v19.1 - CSV Debug) <<<")
     try:
         await load_pac_data_source()
-        print(">>> Dados do PAC carregados do CSV.")
+        print(">>> Dados do PAC carregados.")
     except Exception as e:
         print(f"Erro ao carregar CSV do PAC no startup: {e}")
 
     try:
         from run_check import main_loop
         asyncio.create_task(main_loop())
-        print(">>> Loop de verificação iniciado.")
     except ImportError:
         pass
 
@@ -87,7 +86,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", config.get("GEMINI_API_KEY", None))
 
 # Configuração da Fonte de Dados PAC
 PAC_DATA_FILE = "pac_data.csv" 
-PAC_DATA_URL = os.getenv("PAC_DATA_URL", None) # Opcional: URL do Raw Github para update automático
+PAC_DATA_URL = os.getenv("PAC_DATA_URL", None)
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -424,7 +423,7 @@ async def processar_inlabs(
     pubs_final: List[Publicacao] = []
     usou_fallback = False
     
-    print(f">>> Tentando InLabs (v19.0) para {data}...")
+    print(f">>> Tentando InLabs (v19.1) para {data}...")
     try:
         client = await inlabs_login_and_get_session()
         try:
@@ -648,7 +647,7 @@ async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Di
                 pubs_finais.append({"titulo": item['title'], "link": item['link'], "analise_ia": ai_reason})
     return pubs_finais, links_encontrados
 
-# --- Lógica PAC (Atualizada para CSV) ---
+# --- Lógica PAC (Atualizada para CSV ROBUSTO) ---
 PROGRAMAS_ACOES_PAC = {
     'PROSUB': {'123G': 'ESTALEIRO E BASE NAVAL', '123H': 'SUBMARINO NUCLEAR', '123I': 'SUBMARINOS CONVENCIONAIS'},
     'PNM': {'14T7': 'TECNOLOGIA NUCLEAR'}, 'PRONAPA': {'1N47': 'NAVIOS-PATRULHA'}
@@ -677,6 +676,24 @@ async def load_pac_data_source():
             
     return content
 
+def parse_float_br(val: Any) -> float:
+    """Converte string para float aceitando formatos BR (1.000,00) e US (1000.00)."""
+    if not val: return 0.0
+    s_val = str(val).strip().replace("R$", "").replace(" ", "")
+    if not s_val: return 0.0
+    
+    # Se tiver vírgula e ponto (ex: 1.200,50), assume BR
+    if ',' in s_val and '.' in s_val:
+        s_val = s_val.replace(".", "").replace(",", ".")
+    # Se tiver só vírgula (ex: 1200,50), troca por ponto
+    elif ',' in s_val:
+        s_val = s_val.replace(",", ".")
+    
+    try:
+        return float(s_val)
+    except:
+        return 0.0
+
 def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
     """
     Parseia o CSV e agrupa os dados por ANO e CÓDIGO DA AÇÃO.
@@ -688,14 +705,20 @@ def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
 
     if not csv_content: return {}
     
-    reader = csv.DictReader(io.StringIO(csv_content))
-    # Normaliza headers (remove espaços extras)
+    # Lê usando DictReader e normaliza chaves
+    f = io.StringIO(csv_content)
+    reader = csv.DictReader(f)
+    
+    # Normaliza headers (UPPER + STRIP) para evitar erros de digitação/espaços
     if reader.fieldnames:
-        reader.fieldnames = [x.strip() for x in reader.fieldnames]
-
+        original_fields = reader.fieldnames
+        reader.fieldnames = [x.strip().upper() for x in original_fields]
+        
     for row in reader:
-        # Pega Mês/Ano (Ex: DEZ/2025)
-        mes_lanc = row.get("Mês Lançamento", "").strip().upper()
+        # Pega Mês/Ano (Ex: DEZ/2025) - Chave "MÊS LANÇAMENTO" ou "MÊS LANCAMENTO" ou "MES..."
+        mes_lanc = row.get("MÊS LANÇAMENTO", "") or row.get("MES LANCAMENTO", "") or row.get("MÊS LANCAMENTO", "")
+        mes_lanc = mes_lanc.strip().upper()
+        
         if "/" not in mes_lanc: continue
         
         try:
@@ -705,26 +728,29 @@ def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
             if month == 0: continue
         except: continue
         
-        # Pega Código Ação (Ex: 123G)
-        acao_gov = row.get("Ação Governo", "").strip()
+        # Pega Código Ação (Ex: 123G) - Chave "AÇÃO GOVERNO" ou "ACAO GOVERNO"
+        acao_gov = row.get("AÇÃO GOVERNO", "") or row.get("ACAO GOVERNO", "")
+        acao_gov = acao_gov.strip()
         if not acao_gov: continue
         
         # Helper para limpar float
-        def pf(k):
-            val = row.get(k, "")
-            if not val: return 0.0
-            try: return float(str(val)) # Assume formato padrão (ponto ou sem separador de milhar)
-            except: return 0.0
+        def pf(key_part):
+            # Procura chave que contenha o texto (ex: "DOTACAO ATUALIZADA" em " DOTACAO ATUALIZADA ")
+            val = 0.0
+            for k in row.keys():
+                if k and key_part in k:
+                    val = parse_float_br(row[k])
+                    break
+            return val
 
         vals = {
             "DOTAÇÃO ATUAL": pf("DOTACAO ATUALIZADA"),
             "PROVISIONADO (P)": pf("PROVISAO CONCEDIDA"),
             "DESTAQUE (D)": pf("DESTAQUE CONCEDIDO"),
             "EMPENHADO": pf("DESPESAS EMPENHADAS"),
-            "PAGO": pf("DESPESAS PAGAS"),
-            # Cálculos internos
-            "P+D": pf("PROVISAO CONCEDIDA") + pf("DESTAQUE CONCEDIDO")
+            "PAGO": pf("DESPESAS PAGAS")
         }
+        vals["P+D"] = vals["PROVISIONADO (P)"] + vals["DESTAQUE (D)"]
         
         # Inicializa ano
         if year not in data_store: data_store[year] = {}
@@ -840,6 +866,25 @@ async def force_update_pac():
     # Agora apenas recarrega o CSV se for URL
     await load_pac_data_source()
     return {"status": "OK, CSV Reloaded"}
+
+# --- Endpoint de Diagnóstico ---
+@app.get("/debug-csv")
+async def debug_csv():
+    """Retorna as primeiras 5 linhas do CSV para ver como o Python está lendo."""
+    if not os.path.exists(PAC_DATA_FILE):
+        return {"error": f"Arquivo {PAC_DATA_FILE} não encontrado."}
+    
+    rows = []
+    try:
+        with open(PAC_DATA_FILE, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            headers = next(reader, [])
+            for _ in range(5):
+                try: rows.append(next(reader))
+                except StopIteration: break
+        return {"headers": headers, "first_rows": rows}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.post("/processar-legislativo")
 async def endpoint_legislativo(days: int = Form(5)):
