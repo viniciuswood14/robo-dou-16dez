@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 19.1 (Correção de Leitura CSV: Formatação Numérica e Headers)
+# Versão: 19.1 (Correção Inteligente de CSV: Separador e Formatação)
 
 from fastapi import FastAPI, Form, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,12 +55,15 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v19.1 - CSV Debug) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v19.1 - CSV Inteligente) <<<")
+    # Tenta carregar dados ao iniciar para validar o arquivo
     try:
-        await load_pac_data_source()
-        print(">>> Dados do PAC carregados.")
+        data = await load_pac_data_source()
+        parsed = parse_pac_csv(data)
+        count = sum(len(v) for v in parsed.values())
+        print(f">>> Sucesso! CSV PAC carregado: {len(parsed)} anos, {count} registros processados.")
     except Exception as e:
-        print(f"Erro ao carregar CSV do PAC no startup: {e}")
+        print(f">>> ALERTA: Erro ao ler CSV do PAC: {e}")
 
     try:
         from run_check import main_loop
@@ -705,19 +708,35 @@ def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
 
     if not csv_content: return {}
     
-    # Lê usando DictReader e normaliza chaves
+    # Tenta detectar separador (vírgula ou ponto-e-vírgula)
+    delimiter = ','
+    first_line = csv_content.split('\n')[0]
+    if ';' in first_line and first_line.count(';') > first_line.count(','):
+        delimiter = ';'
+    
     f = io.StringIO(csv_content)
-    reader = csv.DictReader(f)
+    reader = csv.DictReader(f, delimiter=delimiter)
     
     # Normaliza headers (UPPER + STRIP) para evitar erros de digitação/espaços
     if reader.fieldnames:
         original_fields = reader.fieldnames
-        reader.fieldnames = [x.strip().upper() for x in original_fields]
+        # Cria um mapa de normalizado -> original
+        norm_map = {x.strip().upper(): x for x in original_fields}
+    else:
+        norm_map = {}
         
     for row in reader:
-        # Pega Mês/Ano (Ex: DEZ/2025) - Chave "MÊS LANÇAMENTO" ou "MÊS LANCAMENTO" ou "MES..."
-        mes_lanc = row.get("MÊS LANÇAMENTO", "") or row.get("MES LANCAMENTO", "") or row.get("MÊS LANCAMENTO", "")
-        mes_lanc = mes_lanc.strip().upper()
+        # Helper para pegar valor usando chave normalizada (case insensitive e trim)
+        def get_val(key_fragment):
+            for norm_key, orig_key in norm_map.items():
+                if key_fragment in norm_key:
+                    return row.get(orig_key)
+            return None
+
+        # Pega Mês/Ano (Ex: DEZ/2025)
+        # Tenta chaves comuns: "MÊS LANÇAMENTO", "MES LANCAMENTO", etc
+        mes_lanc = get_val("MÊS") or get_val("MES") or ""
+        mes_lanc = str(mes_lanc).strip().upper()
         
         if "/" not in mes_lanc: continue
         
@@ -728,27 +747,22 @@ def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
             if month == 0: continue
         except: continue
         
-        # Pega Código Ação (Ex: 123G) - Chave "AÇÃO GOVERNO" ou "ACAO GOVERNO"
-        acao_gov = row.get("AÇÃO GOVERNO", "") or row.get("ACAO GOVERNO", "")
-        acao_gov = acao_gov.strip()
+        # Pega Código Ação
+        acao_gov = get_val("AÇÃO") or get_val("ACAO") or ""
+        acao_gov = str(acao_gov).strip()
         if not acao_gov: continue
         
         # Helper para limpar float
         def pf(key_part):
-            # Procura chave que contenha o texto (ex: "DOTACAO ATUALIZADA" em " DOTACAO ATUALIZADA ")
-            val = 0.0
-            for k in row.keys():
-                if k and key_part in k:
-                    val = parse_float_br(row[k])
-                    break
-            return val
+            raw = get_val(key_part)
+            return parse_float_br(raw)
 
         vals = {
-            "DOTAÇÃO ATUAL": pf("DOTACAO ATUALIZADA"),
-            "PROVISIONADO (P)": pf("PROVISAO CONCEDIDA"),
-            "DESTAQUE (D)": pf("DESTAQUE CONCEDIDO"),
-            "EMPENHADO": pf("DESPESAS EMPENHADAS"),
-            "PAGO": pf("DESPESAS PAGAS")
+            "DOTAÇÃO ATUAL": pf("ATUALIZADA"),   # Pega 'DOTACAO ATUALIZADA'
+            "PROVISIONADO (P)": pf("PROVISAO"),  # Pega 'PROVISAO CONCEDIDA'
+            "DESTAQUE (D)": pf("DESTAQUE"),      # Pega 'DESTAQUE CONCEDIDO'
+            "EMPENHADO": pf("EMPENHADA"),        # Pega 'DESPESAS EMPENHADAS'
+            "PAGO": pf("PAGAS")                  # Pega 'DESPESAS PAGAS'
         }
         vals["P+D"] = vals["PROVISIONADO (P)"] + vals["DESTAQUE (D)"]
         
@@ -877,7 +891,11 @@ async def debug_csv():
     rows = []
     try:
         with open(PAC_DATA_FILE, "r", encoding="utf-8-sig") as f:
-            reader = csv.reader(f)
+            content = f.read()
+            # Detecta delimitador
+            delimiter = ';' if ';' in content.split('\n')[0] else ','
+            f.seek(0)
+            reader = csv.reader(f, delimiter=delimiter)
             headers = next(reader, [])
             for _ in range(5):
                 try: rows.append(next(reader))
