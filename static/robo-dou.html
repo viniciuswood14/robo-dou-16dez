@@ -46,45 +46,43 @@
       </button>
     </div>
 
-<div class="actions" style="margin-top: 10px;">
-    <a href="https://chatgpt.com/g/g-695b02c6bff0819197bcaedb520ccbc6-dou-completo" 
-       target="_blank" 
-       style="
-          /* Reseta estilo de link */
-          text-decoration: none; 
-          
-          /* Emula o comportamento visual de um botão (alinhado na linha) */
-          display: inline-flex; 
-          align-items: center; 
-          justify-content: center;
-          /* width: 100%;  <-- REMOVIDO O CULPADO */
-          box-sizing: border-box;
-          
-          /* Estilos de fonte e cursor */
-          font-family: inherit;
-          font-size: inherit;
-          font-weight: 500; /* Um pouco mais de peso para parecer botão */
-          line-height: inherit;
-          cursor: pointer;
+    <div class="actions" style="margin-top: 10px;">
+        <button id="btnBaixarPdf" style="background-color: #003366; border-color: #003366;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Abrir Seção 1 (PDF)
+        </button>
 
-          /* Cores e bordas (Padrão ChatGPT) */
-          background-color: #10a37f; 
-          border: 1px solid #10a37f; /* Borda padrão de 1px */
-          color: white;
-          
-          /* Espaçamento interno - tentei um valor médio padrão */
-          padding: 0.5rem 1rem; 
-          gap: 8px;
-          border-radius: 4px;
-          transition: background-color 0.2s; /* Efeito suave ao passar o mouse */
-       "
-       onmouseover="this.style.backgroundColor='#0d8c6d'; this.style.borderColor='#0d8c6d';"
-       onmouseout="this.style.backgroundColor='#10a37f'; this.style.borderColor='#10a37f';"
-       >
-       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-       <span>Análise pelo ChatGPT</span>
-    </a>
-</div>
+        <a href="https://chatgpt.com/g/g-695b02c6bff0819197bcaedb520ccbc6-dou-completo" 
+           target="_blank" 
+           style="
+              text-decoration: none; 
+              display: inline-flex; 
+              align-items: center; 
+              justify-content: center;
+              box-sizing: border-box;
+              
+              font-family: inherit;
+              font-size: inherit;
+              font-weight: 500;
+              line-height: inherit;
+              cursor: pointer;
+
+              background-color: #10a37f; 
+              border: 1px solid #10a37f;
+              color: white;
+              
+              padding: 0.5rem 1rem; 
+              gap: 8px;
+              border-radius: 4px;
+              transition: background-color 0.2s;
+           "
+           onmouseover="this.style.backgroundColor='#0d8c6d'; this.style.borderColor='#0d8c6d';"
+           onmouseout="this.style.backgroundColor='#10a37f'; this.style.borderColor='#10a37f';"
+           >
+           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+           <span>Análise pelo ChatGPT</span>
+        </a>
+    </div>
     
     <div class="actions" style="margin-top: 10px;">
         <button id="btnCopiar" disabled>Copiar Relatório</button>
@@ -93,7 +91,8 @@
     <p class="hint" style="margin-top: -10px; margin-bottom: 20px;">
       <b>DOU (Rápido):</b> Apenas filtra o DOU por palavras-chave.<br>
       <b>DOU (IA):</b> Filtra o DOU e usa IA para analisar o impacto.<br>
-      <b>Análise ChatGPT:</b> Abre o seu GPT personalizado para uma análise aprofundada dos textos.
+      <b>Abrir Seção 1 (PDF):</b> Abre a edição diagramada no site do Governo (não requer login).<br>
+      <b>Análise ChatGPT:</b> Abre seu GPT personalizado para análise aprofundada.
     </p>
 
     <pre id="preview" class="preview" aria-live="polite">Aguardando comando...</pre>
