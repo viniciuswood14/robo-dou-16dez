@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 18.0 (Atualização PAC: Colunas P+D e %)
+# Versão: 19.0 (Fonte de Dados PAC via CSV - Performance Máxima)
 
 from fastapi import FastAPI, Form, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Set, Dict, Any
 from datetime import datetime
-import os, io, zipfile, json, re
+import os, io, zipfile, json, re, csv
 from urllib.parse import urljoin
 import asyncio
 
@@ -19,13 +19,6 @@ import google.generativeai as genai
 
 try:
     from google_search import perform_google_search, SearchResult
-except ImportError:
-    pass
-
-import numpy as np
-try:
-    from orcamentobr import despesa_detalhada
-    from check_pac import update_pac_historical_cache, HISTORICAL_CACHE_PATH
 except ImportError:
     pass
 
@@ -49,7 +42,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô DOU/Valor API - v18.0")
+app = FastAPI(title="Robô DOU/Valor API - v19.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,12 +54,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v18.0 - PAC P+D) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v19.0 - PAC CSV) <<<")
+    # Carrega dados do PAC na memória ao iniciar
     try:
-        if not os.path.exists(HISTORICAL_CACHE_PATH):
-            asyncio.create_task(update_pac_historical_cache())
+        await load_pac_data_source()
+        print(">>> Dados do PAC carregados do CSV.")
     except Exception as e:
-        print(f"Erro ao verificar cache PAC: {e}")
+        print(f"Erro ao carregar CSV do PAC no startup: {e}")
 
     try:
         from run_check import main_loop
@@ -90,6 +84,10 @@ INLABS_LOGIN_URL = os.getenv("INLABS_LOGIN_URL", f"{INLABS_BASE}/login")
 INLABS_USER = os.getenv("INLABS_USER", config.get("INLABS_USER", None))
 INLABS_PASS = os.getenv("INLABS_PASS", config.get("INLABS_PASS", None))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", config.get("GEMINI_API_KEY", None))
+
+# Configuração da Fonte de Dados PAC
+PAC_DATA_FILE = "pac_data.csv" 
+PAC_DATA_URL = os.getenv("PAC_DATA_URL", None) # Opcional: URL do Raw Github para update automático
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -157,7 +155,6 @@ def norm(s: Optional[str]) -> str:
     return _ws.sub(" ", s).strip()
 
 def clean_title(raw_title: str) -> str:
-    """Limpa títulos sujos vindos do nome do arquivo."""
     t = raw_title
     t = t.replace("nA", "Nº").replace("na", "Nº")
     t = t.replace(".2025", "/2025").replace(".2024", "/2024")
@@ -167,38 +164,24 @@ def clean_title(raw_title: str) -> str:
     return norm(t)
 
 def clean_html_text(raw_text: str) -> str:
-    """
-    Remove tags HTML residuais (<table>, <p>, etc) que vêm do CDATA do XML.
-    Retorna apenas o texto limpo legível.
-    """
     if not raw_text or "<" not in raw_text:
         return raw_text
     try:
-        # Força o parser de HTML na string extraída
         soup = BeautifulSoup(raw_text, "html.parser")
         return soup.get_text(" ", strip=True)
     except:
         return raw_text
 
 def extract_fallback_summary(text: str) -> str:
-    """Tenta extrair um resumo quando a Ementa está vazia, limpando HTML."""
-    
-    # 1. Limpa o HTML primeiro (Fundamental para tabelas MPO)
     clean_txt = clean_html_text(text)
-    
-    # 2. Tenta pegar o primeiro parágrafo significativo
     match = re.search(r"(Abre aos? Orçamentos?.*?vigente\.?)", clean_txt, re.IGNORECASE | re.DOTALL)
     if match: return norm(match.group(1))
-    
     match2 = re.search(r"(Altera.*?providências\.?)", clean_txt, re.IGNORECASE | re.DOTALL)
     if match2: return norm(match2.group(1))
-
     match3 = re.search(r"^.*?(?:RESOLVE:?|DECIDE:?)(.*)", clean_txt, re.DOTALL | re.IGNORECASE)
     if match3:
         candidate = match3.group(1).strip()
         return candidate[:300] + ("..." if len(candidate) > 300 else "")
-
-    # 3. Fallback final: Início do texto limpo
     return clean_txt[:350] + ("..." if len(clean_txt) > 350 else "")
 
 def monta_whatsapp(pubs: List[Publicacao], when: str) -> str:
@@ -231,16 +214,12 @@ def monta_whatsapp(pubs: List[Publicacao], when: str) -> str:
         for p in pubs_by_section[sec_key]:
             lines.append(f"▶️ {p.organ or 'Órgão'}")
             lines.append(f"📌 {clean_title(p.type) or 'Ato'}")
-            
-            # Limpa o resumo antes de exibir no WhatsApp
             summary_clean = clean_html_text(p.summary) if p.summary else ""
             if summary_clean:
                 lines.append(f"_{summary_clean}_") 
-            
             reason = p.relevance_reason or "Para conhecimento."
             prefix = "⚓"
             if "erro" in reason.lower() and "ia" in reason.lower(): prefix = "⚠️"
-            
             lines.append(f"{prefix} {reason}")
             lines.append("")
 
@@ -255,14 +234,9 @@ def monta_valor_whatsapp(pubs: List[ValorPublicacao], when: str) -> str:
         lines.append("")
     return "\n".join(lines)
 
-def process_grouped_materia(
-    main_article: BeautifulSoup,
-    full_text_content: str,
-    custom_keywords: List[str],
-) -> Optional[Publicacao]:
+def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str, custom_keywords: List[str]) -> Optional[Publicacao]:
     organ = norm(main_article.get("artCategory", ""))
     organ_lower = organ.lower()
-    
     is_central_budget_organ = any(x in organ_lower for x in ["planejamento", "orçamento", "fazenda", "gestão", "economia", "presidência"])
     
     if not is_central_budget_organ:
@@ -285,11 +259,8 @@ def process_grouped_materia(
     
     if not summary:
         match = re.search(r"EMENTA:(.*?)(Vistos|ACORDAM)", display_text, re.DOTALL | re.I)
-        if match: 
-            summary = norm(match.group(1))
-        else:
-            # Pega o texto limpo do HTML
-            summary = extract_fallback_summary(display_text)
+        if match: summary = norm(match.group(1))
+        else: summary = extract_fallback_summary(display_text)
     
     is_relevant = False
     reason = None
@@ -310,12 +281,10 @@ def process_grouped_materia(
                 is_mpo_navy_hit_flag = True
                 tags_str = ", ".join(found_tags[:3])
                 reason = f"Ato do MPO/Fazenda com impacto direto nas UGs: {tags_str}..."
-            
             elif any(n in search_content_lower for n in ["comando da marinha", "fundo naval", "defesa", "amazul"]):
                 is_relevant = True
                 is_mpo_navy_hit_flag = True
                 reason = "Ato Financeiro/Orçamentário com menção nominal à Marinha/Defesa."
-            
             elif "crédito suplementar" in search_content_lower or "abre aos orçamentos" in search_content_lower:
                 is_relevant = True
                 is_mpo_navy_hit_flag = True
@@ -336,7 +305,6 @@ def process_grouped_materia(
     elif "DO2" in section:
         try: soup_copy = BeautifulSoup(full_text_content, "lxml-xml")
         except: soup_copy = BeautifulSoup(full_text_content, "html.parser")
-
         for tag in soup_copy.find_all("p", class_=["assina", "cargo"]):
             tag.decompose()
         clean_search_content_lower = norm(soup_copy.get_text(strip=True)).lower()
@@ -364,19 +332,11 @@ def process_grouped_materia(
     if is_relevant:
         try: soup_full_clean = BeautifulSoup(full_text_content, "lxml-xml")
         except: soup_full_clean = BeautifulSoup(full_text_content, "html.parser")
-            
         clean_text_for_ia = norm(soup_full_clean.get_text(strip=True))
         return Publicacao(
-            organ=organ,
-            type=act_type,
-            summary=summary,
-            raw=display_text,
-            relevance_reason=reason,
-            section=section,
-            clean_text=clean_text_for_ia,
-            is_mpo_navy_hit=is_mpo_navy_hit_flag,
+            organ=organ, type=act_type, summary=summary, raw=display_text, relevance_reason=reason,
+            section=section, clean_text=clean_text_for_ia, is_mpo_navy_hit=is_mpo_navy_hit_flag,
         )
-    
     return None
 
 async def inlabs_login_and_get_session() -> httpx.AsyncClient:
@@ -464,7 +424,7 @@ async def processar_inlabs(
     pubs_final: List[Publicacao] = []
     usou_fallback = False
     
-    print(f">>> Tentando InLabs (v17.4) para {data}...")
+    print(f">>> Tentando InLabs (v19.0) para {data}...")
     try:
         client = await inlabs_login_and_get_session()
         try:
@@ -628,7 +588,6 @@ async def teste_fallback(data: str = Form(...), keywords_json: Optional[str] = F
     try:
         fb_results = await executar_fallback(data, custom_keywords)
     except Exception as e: raise HTTPException(500, detail=str(e))
-    
     pubs = [Publicacao(organ=i['organ'], type=i['type'], summary=i['summary'], raw=i['raw'], relevance_reason=i['relevance_reason'], section=i['section'], clean_text=i['raw']) for i in fb_results]
     return ProcessResponse(date=data, count=len(pubs), publications=pubs, whatsapp_text=monta_whatsapp(pubs, data))
 
@@ -689,66 +648,147 @@ async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Di
                 pubs_finais.append({"titulo": item['title'], "link": item['link'], "analise_ia": ai_reason})
     return pubs_finais, links_encontrados
 
+# --- Lógica PAC (Atualizada para CSV) ---
 PROGRAMAS_ACOES_PAC = {
     'PROSUB': {'123G': 'ESTALEIRO E BASE NAVAL', '123H': 'SUBMARINO NUCLEAR', '123I': 'SUBMARINOS CONVENCIONAIS'},
     'PNM': {'14T7': 'TECNOLOGIA NUCLEAR'}, 'PRONAPA': {'1N47': 'NAVIOS-PATRULHA'}
 }
 
-async def buscar_dados_acao_pac(ano: int, acao_cod: str) -> Optional[Dict[str, Any]]:
-    try:
-        # Busca dados no orcamentobr
-        df_detalhado = await asyncio.to_thread(
-            despesa_detalhada, 
-            exercicio=ano, 
-            acao=acao_cod, 
-            inclui_descricoes=True, 
-            ignore_secure_certificate=True
-        )
-        
-        if df_detalhado.empty: return None
+async def load_pac_data_source():
+    """Carrega dados do CSV (local ou URL). Retorna texto CSV."""
+    content = ""
+    # 1. Tenta baixar da URL (se configurada)
+    if PAC_DATA_URL:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(PAC_DATA_URL)
+                if r.status_code == 200: content = r.text
+                else: print(f"Erro baixando PAC CSV: {r.status_code}")
+        except Exception as e:
+            print(f"Erro download PAC CSV: {e}")
+    
+    # 2. Tenta ler local (se não baixou)
+    if not content and os.path.exists(PAC_DATA_FILE):
+        try:
+            with open(PAC_DATA_FILE, "r", encoding="utf-8-sig") as f: # utf-8-sig para ignorar BOM
+                content = f.read()
+        except Exception as e:
+            print(f"Erro lendo arquivo local PAC: {e}")
+            
+    return content
 
-        # Adicionamos 'provisionado' e 'destaque' na lista de colunas a somar
-        cols_possiveis = [
-            'loa', 'loa_mais_credito', 'empenhado', 'liquidado', 'pago', 
-            'dotacao_disponivel', 'provisionado', 'destaque'
-        ]
+def parse_pac_csv(csv_content: str) -> Dict[int, Dict[str, Any]]:
+    """
+    Parseia o CSV e agrupa os dados por ANO e CÓDIGO DA AÇÃO.
+    Mantém apenas o mês mais recente de cada ano para cada ação.
+    Retorna: { year: { action_code: { data_dict } } }
+    """
+    MONTHS = {"JAN":1, "FEV":2, "MAR":3, "ABR":4, "MAI":5, "JUN":6, "JUL":7, "AGO":8, "SET":9, "OUT":10, "NOV":11, "DEZ":12}
+    data_store = {} 
+
+    if not csv_content: return {}
+    
+    reader = csv.DictReader(io.StringIO(csv_content))
+    # Normaliza headers (remove espaços extras)
+    if reader.fieldnames:
+        reader.fieldnames = [x.strip() for x in reader.fieldnames]
+
+    for row in reader:
+        # Pega Mês/Ano (Ex: DEZ/2025)
+        mes_lanc = row.get("Mês Lançamento", "").strip().upper()
+        if "/" not in mes_lanc: continue
         
-        # Filtra apenas as colunas que existem no DataFrame retornado
-        colunas = [c for c in cols_possiveis if c in df_detalhado.columns]
+        try:
+            m_str, y_str = mes_lanc.split("/")
+            year = int(y_str)
+            month = MONTHS.get(m_str[:3], 0)
+            if month == 0: continue
+        except: continue
         
-        if not colunas: return None
+        # Pega Código Ação (Ex: 123G)
+        acao_gov = row.get("Ação Governo", "").strip()
+        if not acao_gov: continue
         
-        # Soma os valores
-        totais = df_detalhado[colunas].sum().to_dict()
-        totais['Acao_cod'] = acao_cod
+        # Helper para limpar float
+        def pf(k):
+            val = row.get(k, "")
+            if not val: return 0.0
+            try: return float(str(val)) # Assume formato padrão (ponto ou sem separador de milhar)
+            except: return 0.0
+
+        vals = {
+            "DOTAÇÃO ATUAL": pf("DOTACAO ATUALIZADA"),
+            "PROVISIONADO (P)": pf("PROVISAO CONCEDIDA"),
+            "DESTAQUE (D)": pf("DESTAQUE CONCEDIDO"),
+            "EMPENHADO": pf("DESPESAS EMPENHADAS"),
+            "PAGO": pf("DESPESAS PAGAS"),
+            # Cálculos internos
+            "P+D": pf("PROVISAO CONCEDIDA") + pf("DESTAQUE CONCEDIDO")
+        }
         
-        return totais
-    except Exception as e:
-        print(f"Erro ao buscar dados PAC: {e}")
-        return None
+        # Inicializa ano
+        if year not in data_store: data_store[year] = {}
+        
+        # Lógica de atualização: Se não existe ou se o mês atual é maior que o guardado -> substitui
+        if acao_gov not in data_store[year] or month >= data_store[year][acao_gov]['month']:
+            data_store[year][acao_gov] = {
+                'month': month,
+                'data': vals
+            }
+            
+    return data_store
  
 @app.get("/api/pac-data/historical-dotacao")
 async def get_pac_historical():
-    try:
-        if os.path.exists(HISTORICAL_CACHE_PATH):
-            with open(HISTORICAL_CACHE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        else:
-            return {"labels": [], "datasets": []}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Gera dados do gráfico histórico a partir do CSV carregado."""
+    csv_text = await load_pac_data_source()
+    parsed_data = parse_pac_csv(csv_text)
+    
+    if not parsed_data:
+        return {"labels": [], "datasets": []}
+    
+    # Prepara datasets para Chart.js
+    years = sorted(parsed_data.keys())
+    # Filtra anos irrelevantes (ex: futuros muito distantes ou erros)
+    years = [y for y in years if 2010 <= y <= 2030]
+    
+    datasets_map = {} # { action_code: [val_y1, val_y2...] }
+    
+    # Identifica todas as ações monitoradas
+    all_actions = []
+    for prog, acoes in PROGRAMAS_ACOES_PAC.items():
+        for cod, desc in acoes.items():
+            all_actions.append((cod, desc))
+            datasets_map[cod] = []
+
+    for y in years:
+        y_data = parsed_data.get(y, {})
+        for cod, desc in all_actions:
+            val = 0.0
+            if cod in y_data:
+                val = y_data[cod]['data']['DOTAÇÃO ATUAL']
+            datasets_map[cod].append(val)
+            
+    datasets = []
+    for cod, desc in all_actions:
+        datasets.append({
+            "label": f"{cod} - {desc}",
+            "data": datasets_map[cod]
+        })
+        
+    return {
+        "labels": years,
+        "datasets": datasets
+    }
 
 @app.get("/api/pac-data/{ano}")
-async def get_pac_data(ano: int = Path(..., ge=2010, le=2025)):
-    tasks = []
-    for prog, acoes in PROGRAMAS_ACOES_PAC.items():
-        for acao in acoes.keys(): tasks.append(buscar_dados_acao_pac(ano, acao))
+async def get_pac_data(ano: int = Path(..., ge=2010, le=2030)):
+    """Retorna tabela detalhada para o ano solicitado usando o CSV."""
+    csv_text = await load_pac_data_source()
+    parsed_data = parse_pac_csv(csv_text)
     
-    results = await asyncio.gather(*tasks)
-    dados = [r for r in results if r]
+    year_data = parsed_data.get(ano, {}) # { code: { month: X, data: {} } }
     
-    if not dados: return []
-
     tabela = []
     # Inicializa totais gerais
     total_keys = ['DOTAÇÃO ATUAL', 'PROVISIONADO (P)', 'DESTAQUE (D)', 'P+D', 'EMPENHADO', 'PAGO']
@@ -759,31 +799,14 @@ async def get_pac_data(ano: int = Path(..., ge=2010, le=2025)):
         linhas = []
         
         for cod, desc in acoes.items():
-            row = next((d for d in dados if d.get('Acao_cod') == cod), None)
+            # Busca dados da ação no ano
+            dados_acao = year_data.get(cod, {}).get('data', {})
             
-            def gv(k): return float(row.get(k, 0.0)) if row else 0.0
-            
-            # Valores base
-            dot_atual = gv('loa_mais_credito')
-            prov = gv('provisionado')
-            dest = gv('destaque')
-            emp = gv('empenhado')
-            pago = gv('pago')
-            
-            # Cálculos derivados
-            pd = prov + dest
-            
-            # Monta linha
-            vals = {
-                'DOTAÇÃO ATUAL': dot_atual,
-                'PROVISIONADO (P)': prov,
-                'DESTAQUE (D)': dest,
-                'P+D': pd,
-                'EMPENHADO': emp,
-                'PAGO': pago
-            }
+            vals = {k: dados_acao.get(k, 0.0) for k in total_keys}
             
             # Cálculo da % (Empenhado / P+D)
+            pd = vals['P+D']
+            emp = vals['EMPENHADO']
             percent = (emp / pd * 100) if pd > 0 else 0.0
             vals['% EXEC (P+D)'] = percent
 
@@ -793,7 +816,6 @@ async def get_pac_data(ano: int = Path(..., ge=2010, le=2025)):
             for k in total_keys: soma_prog[k] += vals[k]
 
         # Linha de total do Programa
-        # Recalcula % do programa
         pd_prog = soma_prog['P+D']
         perc_prog = (soma_prog['EMPENHADO'] / pd_prog * 100) if pd_prog > 0 else 0.0
         soma_prog['% EXEC (P+D)'] = perc_prog
@@ -815,8 +837,9 @@ async def get_pac_data(ano: int = Path(..., ge=2010, le=2025)):
     
 @app.post("/api/admin/force-update-pac")
 async def force_update_pac():
-    await update_pac_historical_cache()
-    return {"status": "OK"}
+    # Agora apenas recarrega o CSV se for URL
+    await load_pac_data_source()
+    return {"status": "OK, CSV Reloaded"}
 
 @app.post("/processar-legislativo")
 async def endpoint_legislativo(days: int = Form(5)):
