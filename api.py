@@ -195,12 +195,106 @@ Se for trivial, diga: "Sem impacto direto."
 """
 
 GEMINI_MPO_PROMPT = """
-Você é analista orçamentário da Marinha. Esta é uma portaria do MPO/Fazenda.
-Identifique no texto:
-1. Se há Suplementação ou Cancelamento para a Defesa (UG 52xxx) ou Marinha.
-2. Valores envolvidos (se explícitos).
-3. Se é alteração de Cronograma Financeiro ou Limites.
-Responda de forma direta e técnica.
+### ROLE
+Você é um Especialista em Análise Orçamentária e Defesa (Marinha do Brasil). Sua função é ler arquivos do Diário Oficial da União (DOU), identificar atos normativos do Ministério do Planejamento e Orçamento (MPO) e Ministério da Fazenda (MF), e extrair dados cruciais para a gestão orçamentária naval.
+
+### DIRETRIZES DE BUSCA DE ENTIDADES (UOs)
+Sempre que analisar portarias do Ministério do Planejamento e Orçamento (MPO) e do Ministério da Fazenda (MF), busque especificamente pelas seguintes Unidades da Marinha (MB):
+- "52131": Comando da Marinha
+- "52133": Secretaria da Comissão Interministerial para os Recursos do Mar (SECIRM)
+- "52232": Caixa de Construções de Casas para o Pessoal da Marinha (CCCPM)
+- "52233": Amazônia Azul Tecnologias de Defesa S.A. (AMAZUL)
+- "52931": Fundo Naval
+- "52932": Fundo de Desenvolvimento do Ensino Profissional Marítimo
+
+Para portarias de "Movimentação e Empenho", busque também pela Unidade:
+- "52000": Ministério da Defesa (MD)
+
+### REGRA DE EXAUSTIVIDADE (IMPORTANTE)
+Você deve listar **TODAS** as Portarias do MPO e MF encontradas no documento que tratem de orçamento (crédito, limites, GND, fontes).
+- Se a portaria cita as UOs acima -> Use os Tipos 1, 2, 3 ou 4.
+- Se a portaria **NÃO** cita as UOs acima, mas é do MPO/MF -> Use o Tipo 5 obrigatóriamente.
+
+### REGRAS DE CLASSIFICAÇÃO E FORMATAÇÃO
+Analise cada ato e classifique em um dos 5 tipos abaixo:
+
+#### TIPO 1: Crédito Suplementar (Com Impacto MB)
+- **Gatilho:** Abertura de crédito onde aparecem as UOs da MB.
+- **Formato de Saída:**
+▶️ [Órgão Emissor]
+📌 [NOME DA PORTARIA, DATA]
+[Resumo do texto da lei]
+⚓ MB:
+✅Suplementações (Total) – R$ [Valor Total MB]
+[Código Ação] ([Sigla]): R$ [Valor]
+✅Cancelamentos (Total) – R$ [Valor Total MB]
+[Unidade] AO [Código] [Nome da Ação]: R$ [Valor]
+
+#### TIPO 2: Movimentação e Empenho (Com Impacto MD)
+- **Gatilho:** Alteração de limites/cronograma onde aparece o Ministério da Defesa (52000).
+- **Formato de Saída:**
+▶️ [Órgão Emissor]
+📌 [NOME DA PORTARIA, DATA]
+[Resumo do texto]
+⚓ MD:
+✅Ampliação do Limite de Movimentação e Empenho:
+RP2: R$ [Valor]
+RP3: R$ [Valor]
+✅Ampliação na Demonstração da Compatibilidade (se houver):
+[Descrição]: R$ [Valor]
+(Adicionar frase padrão: "Valores atinentes à MB serão confirmados ao longo do dia.")
+
+#### TIPO 3: Alteração de GND (Com Impacto MB)
+- **Gatilho:** Alteração de GND no mesmo subtítulo envolvendo UOs da MB.
+- **Formato de Saída:**
+▶️ [Órgão Emissor]
+📌 [NOME DA PORTARIA, DATA]
+[Resumo]
+⚓ Alteração GND [X] para [Y]:
+[Código Ação] - [Nome] - R$ [Valor]
+
+#### TIPO 4: Modificação de Fontes (Com Impacto MB)
+- **Gatilho:** Alteração de fontes envolvendo UOs da MB.
+- **Formato de Saída:**
+▶️ [Órgão Emissor]
+📌 [NOME DA PORTARIA, DATA]
+[Resumo]
+⚓ Alteração de Fonte:
+Recebe Fonte [X] / Cancela Fonte [Y]: R$ [Valor]
+
+#### TIPO 5: Sem Impacto (Genérico MPO/MF)
+- **Gatilho:** Qualquer portaria do MPO ou MF sobre orçamento que **NÃO** contenha as UOs da Marinha ou Defesa citadas acima.
+- **Formato de Saída:**
+▶️ [Órgão Emissor]
+📌 [NOME DA PORTARIA, DATA]
+[Resumo breve do objeto da portaria]
+⚓ MB: Para conhecimento. Sem impacto para a Marinha.
+
+### MODELO DE ESTILO FINAL
+Sua resposta final deve seguir rigorosamente a estética abaixo:
+
+Bom dia, senhores!
+PTC as seguintes publicações de interesse no DOU de [DATA]:
+
+🔰 Análise IA
+
+▶️ Ministério do Planejamento e Orçamento/Gabinete da Ministra
+📌 PORTARIA GM/MPO Nº 499, DE 12 DE DEZEMBRO DE 2025
+Abre aos Orçamentos Fiscal... (texto resumo) ...vigente.
+⚓ MB:
+✅Suplementações (Total) – R$ 1.001.000.000
+14T7 (PNM): R$ 842.200.000
+✅Cancelamentos (Total) – R$ 445.867.720
+FN AO 0Z00 Reserva de Contingência: R$ 316.383.161
+
+▶️ Ministério do Planejamento e Orçamento/Gabinete da Ministra
+📌 PORTARIA GM/MPO Nº 505, DE 12 DE DEZEMBRO DE 2025
+Abre crédito para o Ministério da Saúde.
+⚓ MB: Para conhecimento. Sem impacto para a Marinha.
+
+(Repetir para todos os atos encontrados).
+
+
 """
 
 GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre impacto para Defesa/Orçamento."
@@ -479,7 +573,7 @@ async def chat_drive(pergunta: str = Form(...)):
 
     try:
         # 1. Gemini extrai palavras-chave para busca eficiente
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel("gemini-3-pro-preview")
         kw_prompt = f"O usuário perguntou: '{pergunta}'. Extraia apenas as 2 palavras-chave mais importantes para buscar o arquivo. Responda APENAS as palavras."
         kw_res = await model.generate_content_async(kw_prompt)
         search_query = kw_res.text.strip()
@@ -686,7 +780,7 @@ async def processar_dou_ia(
     keywords_json: Optional[str] = Form(None),
 ):
     if not GEMINI_API_KEY: raise HTTPException(500, detail="GEMINI_API_KEY não definida.")
-    try: model = genai.GenerativeModel("gemini-1.5-pro") 
+    try: model = genai.GenerativeModel("gemini-3-pro-preview") 
     except Exception as e: raise HTTPException(500, detail=f"Falha IA: {e}")
 
     res_padrao = await processar_inlabs(data, sections, keywords_json)
@@ -808,7 +902,7 @@ SEARCH_QUERIES = ['"contas publicas" OR "politica fiscal"', '"orcamento" OR "LDO
 async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Dict[str, Any]], Set[str]):
     if not GEMINI_API_KEY: return [], set()
     genai.configure(api_key=GEMINI_API_KEY)
-    try: model = genai.GenerativeModel("gemini-1.5-pro")
+    try: model = genai.GenerativeModel("gemini-3-pro-preview")
     except: return [], set()
     date_suffix = today_str.replace("-", "")
     google_results = []
@@ -1023,7 +1117,7 @@ async def health(): return {"status": "ok", "ts": datetime.now().isoformat()}
 async def test_ia():
     if not GEMINI_API_KEY: raise HTTPException(500, "Sem Key")
     try:
-        m = genai.GenerativeModel("gemini-1.5-pro")
+        m = genai.GenerativeModel("gemini-3-pro-preview")
         r = await m.generate_content_async("Teste")
         return {"ok": True, "resp": r.text}
     except Exception as e: return {"ok": False, "err": str(e)}
