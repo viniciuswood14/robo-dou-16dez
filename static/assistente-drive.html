@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Assistente de Arquivos - CORM</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .chat-container { height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 15px; background: #fff; border-radius: 8px; margin-bottom: 20px; }
+    .msg { margin-bottom: 10px; padding: 8px 12px; border-radius: 15px; max-width: 80%; }
+    .user { background: #e3f2fd; align-self: flex-end; margin-left: auto; text-align: right; }
+    .bot { background: #f1f1f1; align-self: flex-start; }
+    .input-area { display: flex; gap: 10px; }
+  </style>
+</head>
+<body>
+  <a href="index.html" class="back-link">← Voltar</a>
+  <main class="card">
+    <header class="card-header">
+      <h1>⚓ Assistente de Inteligência (Drive)</h1>
+    </header>
+
+    <div id="chatBox" class="chat-container">
+      <div class="msg bot">Olá! Posso pesquisar no seu Drive. Pergunte, por exemplo: "Qual o último arquivo sobre a Classe Tamandaré?"</div>
+    </div>
+
+    <div class="input-area">
+      <input type="text" id="userInput" placeholder="Digite sua pergunta..." style="flex-grow: 1;">
+      <button id="btnEnviar">Perguntar</button>
+    </div>
+  </main>
+
+  <script>
+    const btnEnviar = document.getElementById('btnEnviar');
+    const input = document.getElementById('userInput');
+    const chatBox = document.getElementById('chatBox');
+
+    btnEnviar.onclick = async () => {
+      const prompt = input.value;
+      if(!prompt) return;
+
+      // Adiciona pergunta na tela
+      chatBox.innerHTML += `<div class="msg user">${prompt}</div>`;
+      input.value = "";
+
+      // Chama o seu backend no Render
+      const response = await fetch('/chat-drive', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: `pergunta=${encodeURIComponent(prompt)}`
+      });
+      
+      const data = await response.json();
+      chatBox.innerHTML += `<div class="msg bot">${data.resposta}</div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    };
+  </script>
+</body>
+</html>
