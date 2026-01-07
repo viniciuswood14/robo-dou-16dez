@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acesso Restrito - CORM</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f8f9fa; }
+        .login-card { width: 100%; max-width: 400px; padding: 2rem; text-align: center; }
+        .login-input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
+        .btn-login { width: 100%; padding: 12px; background-color: #002c5f; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .btn-login:hover { background-color: #001f44; }
+        .error { color: #dc3545; margin-bottom: 10px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="card login-card">
+        <header class="card-header" style="justify-content: center; margin-bottom: 20px;">
+            <img src="logo-marinha.png" alt="Logotipo da Marinha" class="logo" style="width: 60px; height: auto;">
+        </header>
+        <h2>Acesso Restrito</h2>
+        <p>Informe a senha de acesso à Central de Monitoramento.</p>
+        
+        <form action="/login" method="POST">
+            <input type="password" name="senha" class="login-input" placeholder="Digite a senha..." required autofocus>
+            <button type="submit" class="btn-login">Entrar</button>
+        </form>
+    </div>
+</body>
+</html>
