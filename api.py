@@ -406,7 +406,7 @@ async def chat_drive(pergunta: str = Form(...)):
 
     try:
         # 1. Gemini extrai palavras-chave para busca eficiente
-        model = genai.GenerativeModel("gemini-1.5-pro")
+        model = genai.GenerativeModel("gemini-3-pro-preview")
         kw_prompt = f"O usuário perguntou: '{pergunta}'. Extraia apenas as 2 palavras-chave mais importantes para buscar o arquivo. Responda APENAS as palavras."
         kw_res = await model.generate_content_async(kw_prompt)
         search_query = kw_res.text.strip()
@@ -615,7 +615,7 @@ async def processar_dou_ia(
     keywords_json: Optional[str] = Form(None),
 ):
     if not GEMINI_API_KEY: raise HTTPException(500, detail="GEMINI_API_KEY não definida.")
-    try: model = genai.GenerativeModel("gemini-2.5-flash") 
+    try: model = genai.GenerativeModel("gemini-3-pro-preview") 
     except Exception as e: raise HTTPException(500, detail=f"Falha IA: {e}")
 
     res_padrao = await processar_inlabs(data, sections, keywords_json)
@@ -737,7 +737,7 @@ SEARCH_QUERIES = ['"contas publicas" OR "politica fiscal"', '"orcamento" OR "LDO
 async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Dict[str, Any]], Set[str]):
     if not GEMINI_API_KEY: return [], set()
     genai.configure(api_key=GEMINI_API_KEY)
-    try: model = genai.GenerativeModel("gemini-2.5-flash")
+    try: model = genai.GenerativeModel("gemini-3-pro-preview")
     except: return [], set()
     date_suffix = today_str.replace("-", "")
     google_results = []
@@ -952,7 +952,7 @@ async def health(): return {"status": "ok", "ts": datetime.now().isoformat()}
 async def test_ia():
     if not GEMINI_API_KEY: raise HTTPException(500, "Sem Key")
     try:
-        m = genai.GenerativeModel("gemini-1.5-pro")
+        m = genai.GenerativeModel("gemini-3-pro-preview")
         r = await m.generate_content_async("Teste")
         return {"ok": True, "resp": r.text}
     except Exception as e: return {"ok": False, "err": str(e)}
