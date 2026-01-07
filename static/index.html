@@ -25,6 +25,11 @@
         <p>Acessar a ferramenta para processar e analisar manualmente o Diário Oficial e o Valor Econômico.</p>
       </a>
 
+      <a href="assistente-drive.html" class="hub-card">
+        <h2><span class="emoji">📂</span> Assistente de Arquivos</h2>
+        <p>Pesquisar documentos, notas e tirar dúvidas sobre arquivos do Google Drive usando Inteligência Artificial.</p>
+      </a>
+
       <a href="pac.html" class="hub-card">
         <h2><span class="emoji">📊</span> Dashboard PAC</h2>
         <p>Acessar o painel de execução orçamentária das ações do Novo PAC (dados via SIOP).</p>
@@ -47,8 +52,11 @@
     const year = today.getFullYear();
     const month = String(today.getMonth() + 1).padStart(2, '0');
     const day = String(today.getDate()).padStart(2, '0');
+    
     const valorLink = document.getElementById('valor-link');
-    valorLink.href = `https://valor.globo.com/impresso/${year}${month}${day}/`;
+    if (valorLink) {
+        valorLink.href = `https://valor.globo.com/impresso/${year}${month}${day}/`;
+    }
   </script>
 </body>
 </html>
