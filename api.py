@@ -221,9 +221,6 @@ Analise cada ato e classifique em um dos 5 tipos abaixo:
 #### TIPO 1: Crédito Suplementar (Com Impacto MB)
 - **Gatilho:** Abertura de crédito onde aparecem as UOs da MB.
 - **Formato de Saída:**
-▶️ [Órgão Emissor]
-📌 [NOME DA PORTARIA, DATA]
-[Resumo do texto da lei]
 ⚓ MB:
 ✅Suplementações (Total) – R$ [Valor Total MB]
 [Código Ação] ([Sigla]): R$ [Valor]
@@ -233,9 +230,6 @@ Analise cada ato e classifique em um dos 5 tipos abaixo:
 #### TIPO 2: Movimentação e Empenho (Com Impacto MD)
 - **Gatilho:** Alteração de limites/cronograma onde aparece o Ministério da Defesa (52000).
 - **Formato de Saída:**
-▶️ [Órgão Emissor]
-📌 [NOME DA PORTARIA, DATA]
-[Resumo do texto]
 ⚓ MD:
 ✅Ampliação do Limite de Movimentação e Empenho:
 RP2: R$ [Valor]
@@ -247,27 +241,18 @@ RP3: R$ [Valor]
 #### TIPO 3: Alteração de GND (Com Impacto MB)
 - **Gatilho:** Alteração de GND no mesmo subtítulo envolvendo UOs da MB.
 - **Formato de Saída:**
-▶️ [Órgão Emissor]
-📌 [NOME DA PORTARIA, DATA]
-[Resumo]
 ⚓ Alteração GND [X] para [Y]:
 [Código Ação] - [Nome] - R$ [Valor]
 
 #### TIPO 4: Modificação de Fontes (Com Impacto MB)
 - **Gatilho:** Alteração de fontes envolvendo UOs da MB.
 - **Formato de Saída:**
-▶️ [Órgão Emissor]
-📌 [NOME DA PORTARIA, DATA]
-[Resumo]
 ⚓ Alteração de Fonte:
 Recebe Fonte [X] / Cancela Fonte [Y]: R$ [Valor]
 
 #### TIPO 5: Sem Impacto (Genérico MPO/MF)
 - **Gatilho:** Qualquer portaria do MPO ou MF sobre orçamento que **NÃO** contenha as UOs da Marinha ou Defesa citadas acima.
 - **Formato de Saída:**
-▶️ [Órgão Emissor]
-📌 [NOME DA PORTARIA, DATA]
-[Resumo breve do objeto da portaria]
 ⚓ MB: Para conhecimento. Sem impacto para a Marinha.
 
 ### MODELO DE ESTILO FINAL
