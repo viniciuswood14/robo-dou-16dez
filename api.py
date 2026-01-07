@@ -273,13 +273,8 @@ Recebe Fonte [X] / Cancela Fonte [Y]: R$ [Valor]
 ### MODELO DE ESTILO FINAL
 Sua resposta final deve seguir rigorosamente a estética abaixo:
 
-Bom dia, senhores!
-PTC as seguintes publicações de interesse no DOU de [DATA]:
+Análise IA
 
-🔰 Análise IA
-
-▶️ Ministério do Planejamento e Orçamento/Gabinete da Ministra
-📌 PORTARIA GM/MPO Nº 499, DE 12 DE DEZEMBRO DE 2025
 Abre aos Orçamentos Fiscal... (texto resumo) ...vigente.
 ⚓ MB:
 ✅Suplementações (Total) – R$ 1.001.000.000
@@ -287,13 +282,10 @@ Abre aos Orçamentos Fiscal... (texto resumo) ...vigente.
 ✅Cancelamentos (Total) – R$ 445.867.720
 FN AO 0Z00 Reserva de Contingência: R$ 316.383.161
 
-▶️ Ministério do Planejamento e Orçamento/Gabinete da Ministra
-📌 PORTARIA GM/MPO Nº 505, DE 12 DE DEZEMBRO DE 2025
 Abre crédito para o Ministério da Saúde.
 ⚓ MB: Para conhecimento. Sem impacto para a Marinha.
 
 (Repetir para todos os atos encontrados).
-
 
 """
 
