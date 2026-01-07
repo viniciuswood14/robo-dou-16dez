@@ -1,7 +1,8 @@
 # Nome do arquivo: api.py
-# Versão: 20.0 (Integração Google Drive Assistente + Gemini)
+# Versão: 21.0 (Integração Total: Drive + Autenticação/Senha)
 
-from fastapi import FastAPI, Form, HTTPException, Path
+from fastapi import FastAPI, Form, HTTPException, Path, Request
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles 
 from pydantic import BaseModel
@@ -10,7 +11,6 @@ from datetime import datetime
 import os, io, zipfile, json, re, csv
 from urllib.parse import urljoin
 import asyncio
-
 import httpx
 from bs4 import BeautifulSoup
 
@@ -21,7 +21,7 @@ import google.generativeai as genai
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 
-# Tenta importar módulos opcionais
+# Tenta importar módulos opcionais (Robôs específicos)
 try:
     from google_search import perform_google_search, SearchResult
 except ImportError:
@@ -47,7 +47,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v20.0 (Drive Integrado)")
+app = FastAPI(title="Robô CORM API - v21.0 (Secure + Drive)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,9 +57,88 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- CONFIGURAÇÃO DE SENHA ---
+# Defina SITE_PASSWORD no Render. Se não tiver, usa 'admin' (Cuidado!)
+SITE_PASSWORD = os.getenv("SITE_PASSWORD", "admin")
+
+# =====================================================================================
+# MIDDLEWARE DE AUTENTICAÇÃO (O PORTEIRO)
+# =====================================================================================
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    
+    # 1. Lista de arquivos/rotas que NÃO precisam de senha (públicos)
+    # Precisamos liberar CSS, JS, Imagens, JSON e a própria rota de Login
+    # Também liberamos rotas de API puras (opcional, mas bom para webhooks do Telegram se houver)
+    public_paths = ["/login", "/auth", "/favicon.ico", "/health"]
+    public_extensions = (".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".json", ".ico")
+
+    if path in public_paths or path.endswith(public_extensions):
+        return await call_next(request)
+
+    # 2. Verifica se tem o Cookie de Acesso
+    auth_cookie = request.cookies.get("corm_session")
+    
+    # Se o cookie for válido (igual à senha atual), deixa passar
+    if auth_cookie == SITE_PASSWORD:
+        return await call_next(request)
+    
+    # 3. Se não tiver cookie e não for público, manda pro Login
+    return RedirectResponse(url="/login", status_code=303)
+
+# =====================================================================================
+# ROTAS DE LOGIN
+# =====================================================================================
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    # Retorna o arquivo login.html que criamos na pasta static
+    if os.path.exists("static/login.html"):
+        return FileResponse("static/login.html")
+    # Fallback simples caso o arquivo não exista
+    return """
+    <html>
+        <body style="font-family: sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f2f5;">
+            <div style="background:white; padding:2rem; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); text-align:center;">
+                <h2>Acesso Restrito</h2>
+                <form action="/login" method="post">
+                    <input type="password" name="senha" placeholder="Senha do Sistema" style="padding:10px; margin-bottom:10px; width:100%; box-sizing:border-box;" required/>
+                    <br/>
+                    <input type="submit" value="Entrar" style="padding:10px 20px; background:#002c5f; color:white; border:none; border-radius:4px; cursor:pointer;"/>
+                </form>
+            </div>
+        </body>
+    </html>
+    """
+
+@app.post("/login")
+async def login_submit(senha: str = Form(...)):
+    # Verifica a senha
+    if senha == SITE_PASSWORD:
+        # Senha correta: Cria o cookie e redireciona para a Home
+        response = RedirectResponse(url="/", status_code=303)
+        # O cookie dura até o navegador fechar (session)
+        response.set_cookie(key="corm_session", value=SITE_PASSWORD, httponly=True)
+        return response
+    else:
+        # Senha errada: Volta pro login
+        return RedirectResponse(url="/login?erro=1", status_code=303)
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("corm_session")
+    return response
+
+# =====================================================================================
+# INICIALIZAÇÃO E CONFIGURAÇÕES
+# =====================================================================================
+
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v20.0 - Drive Assistant) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.0 - Secure + Drive) <<<")
     
     # Validação PAC
     try:
@@ -76,10 +155,6 @@ async def startup_event():
         asyncio.create_task(main_loop())
     except ImportError:
         pass
-
-# =====================================================================================
-# CONFIGURAÇÕES E CREDENCIAIS
-# =====================================================================================
 
 try:
     with open("config.json", "r", encoding="utf-8") as f:
@@ -100,7 +175,7 @@ PAC_DATA_URL = os.getenv("PAC_DATA_URL", None)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# Configurações de TAGS e Prompts (Mantidos da v19.1)
+# Configurações de TAGS e Prompts
 MPO_NAVY_TAGS = config.get("MPO_NAVY_TAGS", {})
 KEYWORDS_DIRECT_INTEREST_S1 = config.get("KEYWORDS_DIRECT_INTEREST_S1", [])
 BUDGET_KEYWORDS_S1 = config.get("BUDGET_KEYWORDS_S1", [])
@@ -130,7 +205,7 @@ Responda de forma direta e técnica.
 
 GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre impacto para Defesa/Orçamento."
 
-# --- [NOVO] Configuração Google Drive Auth ---
+# --- Configuração Google Drive Auth ---
 SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
 
 def get_drive_service():
@@ -277,11 +352,9 @@ def monta_valor_whatsapp(pubs: List[ValorPublicacao], when: str) -> str:
         lines.append("")
     return "\n".join(lines)
 
-# ... (Função process_grouped_materia mantida igual à v19.1 - Omitida para brevidade, mas deve estar aqui) ...
 # Vou manter a estrutura para não cortar lógica importante
 def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str, custom_keywords: List[str]) -> Optional[Publicacao]:
-    # [Lógica IDÊNTICA à v19.1 enviada]
-    # Copiar exatamente a função do seu código anterior para garantir compatibilidade
+    # [Lógica de parsing do DOU]
     organ = norm(main_article.get("artCategory", ""))
     organ_lower = organ.lower()
     is_central_budget_organ = any(x in organ_lower for x in ["planejamento", "orçamento", "fazenda", "gestão", "economia", "presidência"])
@@ -387,7 +460,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     return None
 
 # =====================================================================================
-# [NOVO] ENDPOINT DO ASSISTENTE DRIVE
+# ENDPOINT DO ASSISTENTE DRIVE
 # =====================================================================================
 
 @app.post("/chat-drive")
@@ -406,13 +479,12 @@ async def chat_drive(pergunta: str = Form(...)):
 
     try:
         # 1. Gemini extrai palavras-chave para busca eficiente
-        model = genai.GenerativeModel("gemini-3-pro-preview")
+        model = genai.GenerativeModel("gemini-1.5-pro")
         kw_prompt = f"O usuário perguntou: '{pergunta}'. Extraia apenas as 2 palavras-chave mais importantes para buscar o arquivo. Responda APENAS as palavras."
         kw_res = await model.generate_content_async(kw_prompt)
         search_query = kw_res.text.strip()
 
         # 2. Busca no Drive (Nome ou Conteúdo Texto)
-        # Atenção: 'fullText' funciona, mas aspas simples dentro da query podem quebrar.
         q_clean = search_query.replace("'", "")
         query_drive = f"name contains '{q_clean}' or fullText contains '{q_clean}'"
         
@@ -431,7 +503,6 @@ async def chat_drive(pergunta: str = Form(...)):
         # 3. Prepara contexto para o Gemini responder
         contexto_drive = ""
         for f in files:
-            # Converte data ISO para algo legível se possível, ou deixa cru
             dt_iso = f.get('modifiedTime', '')
             contexto_drive += f"- Arquivo: {f['name']} (Data: {dt_iso}) - Link: {f['webViewLink']}\n"
 
@@ -456,7 +527,7 @@ async def chat_drive(pergunta: str = Form(...)):
 
 
 # =====================================================================================
-# ENDPOINTS AUXILIARES (INLABS, ETC) - MANTIDOS DA VERSÃO 19.1
+# ENDPOINTS AUXILIARES (INLABS, ETC)
 # =====================================================================================
 
 async def inlabs_login_and_get_session() -> httpx.AsyncClient:
@@ -544,7 +615,7 @@ async def processar_inlabs(
     pubs_final: List[Publicacao] = []
     usou_fallback = False
     
-    print(f">>> Tentando InLabs (v19.1) para {data}...")
+    print(f">>> Tentando InLabs (v21.0) para {data}...")
     try:
         client = await inlabs_login_and_get_session()
         try:
@@ -615,7 +686,7 @@ async def processar_dou_ia(
     keywords_json: Optional[str] = Form(None),
 ):
     if not GEMINI_API_KEY: raise HTTPException(500, detail="GEMINI_API_KEY não definida.")
-    try: model = genai.GenerativeModel("gemini-3-pro-preview") 
+    try: model = genai.GenerativeModel("gemini-1.5-pro") 
     except Exception as e: raise HTTPException(500, detail=f"Falha IA: {e}")
 
     res_padrao = await processar_inlabs(data, sections, keywords_json)
@@ -737,7 +808,7 @@ SEARCH_QUERIES = ['"contas publicas" OR "politica fiscal"', '"orcamento" OR "LDO
 async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Dict[str, Any]], Set[str]):
     if not GEMINI_API_KEY: return [], set()
     genai.configure(api_key=GEMINI_API_KEY)
-    try: model = genai.GenerativeModel("gemini-3-pro-preview")
+    try: model = genai.GenerativeModel("gemini-1.5-pro")
     except: return [], set()
     date_suffix = today_str.replace("-", "")
     google_results = []
@@ -952,7 +1023,7 @@ async def health(): return {"status": "ok", "ts": datetime.now().isoformat()}
 async def test_ia():
     if not GEMINI_API_KEY: raise HTTPException(500, "Sem Key")
     try:
-        m = genai.GenerativeModel("gemini-3-pro-preview")
+        m = genai.GenerativeModel("gemini-1.5-pro")
         r = await m.generate_content_async("Teste")
         return {"ok": True, "resp": r.text}
     except Exception as e: return {"ok": False, "err": str(e)}
