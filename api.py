@@ -428,7 +428,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     # 1. Extração do Órgão
     organ = norm(main_article.get("artCategory", ""))
     
-    # Filtro de órgãos (mantendo sua lógica original)
+    # Filtros de Órgão
     organ_lower = organ.lower()
     is_central_budget_organ = any(x in organ_lower for x in ["planejamento", "orçamento", "fazenda", "gestão", "economia", "presidência"])
     
@@ -440,43 +440,77 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     body = main_article.find("body")
     if not body: return None
 
-    # --- CORREÇÃO (Extração Robusta de Identifica e Ementa) ---
+    # Converta o objeto soup para string para usar Regex caso o parser falhe
+    raw_article_str = str(main_article)
 
-    # 2. Extração do Título (Busca direta na tag <Identifica>)
-    # O conteúdo costuma vir dentro de CDATA, o BeautifulSoup extrai o texto automaticamente,
-    # mas usamos o 'norm' para limpar espaços extras e quebras de linha.
+    # --- TÍTULO (IDENTIFICA) ---
     act_type = ""
+    
+    # Tentativa 1: Busca padrão BeautifulSoup
     identifica_node = body.find("Identifica")
     if identifica_node:
-        # Pega o texto limpo de dentro da tag, removendo HTML interno se houver
         act_type = norm(identifica_node.get_text(" ", strip=True))
     
-    # Fallback: Se <Identifica> estiver vazio, tenta o atributo 'name' ou 'artType'
+    # Tentativa 2: Busca por Classe HTML (alguns XMLs vêm assim)
+    if not act_type:
+        p_identifica = body.find("p", class_="identifica")
+        if p_identifica:
+            act_type = norm(p_identifica.get_text(" ", strip=True))
+
+    # Tentativa 3: Força Bruta (Regex) - Pega o que estiver dentro de <Identifica>...</Identifica>
+    if not act_type:
+        # Procura por: <Identifica> (qualquer coisa, inclusive CDATA) </Identifica>
+        match = re.search(r"<Identifica>(.*?)</Identifica>", raw_article_str, re.DOTALL | re.IGNORECASE)
+        if match:
+            content = match.group(1)
+            # Remove a sujeira do CDATA se o Regex pegou
+            content = content.replace("<![CDATA[", "").replace("]]>", "")
+            act_type = norm(clean_html_text(content))
+
+    # Fallback final
     if not act_type:
         act_type = norm(main_article.get("name", "")) or norm(main_article.get("artType", "Ato Administrativo"))
     
     if not act_type: return None
     
-    # 3. Extração da Ementa (Busca direta na tag <Ementa>)
+
+    # --- EMENTA (RESUMO) ---
     summary = ""
+    
+    # Tentativa 1: Busca padrão BeautifulSoup
     ementa_node = body.find("Ementa")
     if ementa_node:
         summary = norm(ementa_node.get_text(" ", strip=True))
+
+    # Tentativa 2: Busca por Classe HTML
+    if not summary:
+        p_ementa = body.find("p", class_="ementa")
+        if p_ementa:
+            summary = norm(p_ementa.get_text(" ", strip=True))
+
+    # Tentativa 3: Força Bruta (Regex)
+    if not summary:
+        match = re.search(r"<Ementa>(.*?)</Ementa>", raw_article_str, re.DOTALL | re.IGNORECASE)
+        if match:
+            content = match.group(1)
+            content = content.replace("<![CDATA[", "").replace("]]>", "")
+            summary = norm(clean_html_text(content))
             
-    # Texto completo (para busca de keywords e envio para IA)
+    # Texto completo (para o parser da IA)
     display_text = norm(body.get_text(" ", strip=True))
     
-    # Fallback de Ementa: Se não achou a tag, tenta regex no texto completo
+    # Fallback de Ementa (se tudo falhar, tenta achar "EMENTA:" no corpo ou pega o início)
     if not summary:
         match = re.search(r"EMENTA:(.*?)(Vistos|ACORDAM|RESOLVE)", display_text, re.DOTALL | re.I)
-        if match: summary = norm(match.group(1))
+        if match: 
+            summary = norm(match.group(1))
         else: 
-            # Função auxiliar já existente no seu código
+            # Se não tiver ementa explicita, usa a função de fallback (primeiras linhas)
             summary = extract_fallback_summary(display_text)
     
     # --- FIM DA CORREÇÃO ---
     
-    # Lógica de Filtros e Keywords (Mantida idêntica ao original)
+    # Lógica de Relevância (Mantida)
     is_relevant = False
     reason = None
     search_content_lower = norm(full_text_content).lower()
@@ -518,7 +552,6 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
                 reason = "Ato orçamentário geral."
 
     elif "DO2" in section:
-        # Limpeza específica para DO2 (Pessoas)
         try: soup_copy = BeautifulSoup(full_text_content, "lxml-xml")
         except: soup_copy = BeautifulSoup(full_text_content, "html.parser")
         for tag in soup_copy.find_all("p", class_=["assina", "cargo"]):
