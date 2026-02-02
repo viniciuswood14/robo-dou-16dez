@@ -9,7 +9,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const btnProcessar = el("btnProcessar");
   const btnProcessarIA = el("btnProcessarIA");
   const btnProcessarValor = el("btnProcessarValor");
-  const btnBaixarPdf = el("btnBaixarPdf"); // Novo botão para o PDF
+  const btnBaixarPdf = document.getElementById('btnBaixarPdf');
   const btnCopiar = el("btnCopiar");
   
   // Elementos (Inputs/Output)
@@ -24,14 +24,32 @@ document.addEventListener("DOMContentLoaded", function() {
   })();
 
   // --- 1. Lógica do Botão PDF (Site Oficial) ---
-  if (btnBaixarPdf) {
-    btnBaixarPdf.addEventListener("click", () => {
-      const dataVal = el("data").value; // Vem como YYYY-MM-DD
-      
-      if (!dataVal) {
-        alert("Por favor, informe a data (YYYY-MM-DD) antes de abrir o PDF.");
-        return;
-      }
+ if (btnBaixarPdf) {
+    btnBaixarPdf.addEventListener('click', () => {
+        const dateInput = document.getElementById('dataDou');
+        const dateVal = dateInput.value; // YYYY-MM-DD
+        
+        if (!dateVal) {
+            alert('Por favor, selecione uma data primeiro.');
+            return;
+        }
+
+        // Feedback visual simples (opcional)
+        const originalText = btnBaixarPdf.innerText;
+        btnBaixarPdf.innerText = "Baixando...";
+        btnBaixarPdf.disabled = true;
+
+        // Chama a rota do Backend em uma nova aba.
+        // O browser vai entender o header "attachment" e iniciar o download.
+        window.location.href = `/download-pdf-inlabs?date=${dateVal}&section=do1`;
+
+        // Restaura o botão após alguns segundos (já que não temos callback do download via window.location)
+        setTimeout(() => {
+            btnBaixarPdf.innerText = originalText;
+            btnBaixarPdf.disabled = false;
+        }, 5000);
+    });
+}
 
       // Validação e conversão de formato
       const parts = dataVal.split("-");
