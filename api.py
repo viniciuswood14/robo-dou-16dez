@@ -14,6 +14,9 @@ import asyncio
 import httpx
 from bs4 import BeautifulSoup
 from fastapi.responses import Response # Importante para enviar o PDF binário
+from fastapi.responses import Response
+from urllib.parse import urljoin
+import io
 
 # IA / Gemini
 import google.generativeai as genai
@@ -145,51 +148,90 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
             if target in href.upper() or target in a.get_text().upper():
                 return urljoin(base_url_for_rel, href)
     return None
-# --- ADICIONE NO FINAL DO ARQUIVO (Antes do @app.on_event ou onde preferir) ---
+# ==========================================
+#  ROTAS PARA DOWNLOAD DO PDF (INLABS PROXY)
+# ==========================================
+
+# ==========================================
+#  ROTAS PARA DOWNLOAD DO PDF (INLABS DIRECT)
+# ==========================================
+
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
     """
-    Baixa o PDF do InLabs (autenticado) e repassa para o usuário.
+    Autentica e baixa o PDF usando o link direto do InLabs:
+    https://inlabs.in.gov.br/index.php?p=YYYY-MM-DD&dl=YYYY_MM_DD_ASSINADO_do1.pdf
     """
-    print(f">>> Solicitado PDF InLabs: {date} ({section})")
+    print(f">>> [Direct PDF] Iniciando download: {date} ({section})")
     
-    # 1. Autentica
-    try:
-        client = await inlabs_login_and_get_session()
-    except Exception as e:
-        return Response(content=f"Erro de Login InLabs: {str(e)}", status_code=500)
+    # 1. Configura Login
+    email = CONFIG.get("inlabs_email") or os.getenv("INLABS_EMAIL")
+    senha = CONFIG.get("inlabs_password") or os.getenv("INLABS_PASSWORD")
+    
+    if not email or not senha:
+        return Response(content="Credenciais InLabs não configuradas.", status_code=500)
 
+    # 2. Monta a URL Mágica
     try:
-        # 2. Acha a pasta da data
+        dt_obj = datetime.strptime(date, "%Y-%m-%d")
+        
+        # Parâmetro p=YYYY-MM-DD
+        param_p = dt_obj.strftime("%Y-%m-%d")
+        
+        # Parâmetro dl=YYYY_MM_DD_ASSINADO_do1.pdf
+        # Garante que seção seja minúscula (do1, do2, do3, doe)
+        sec_code = section.lower()
+        filename = f"{dt_obj.strftime('%Y_%m_%d')}_ASSINADO_{sec_code}.pdf"
+        
+        # URL Final
+        direct_url = f"https://inlabs.in.gov.br/index.php?p={param_p}&dl={filename}"
+        
+        print(f">>> [Direct PDF] URL Alvo: {direct_url}")
+        
+    except Exception as e:
+        return Response(content=f"Erro ao montar URL: {str(e)}", status_code=400)
+
+    # 3. Executa o Download
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
         try:
-            listing_url = await resolve_date_url(client, date)
-            html = await fetch_listing_html(client, date)
-        except Exception:
-            return Response(content="Data não encontrada ou ainda não publicada no InLabs.", status_code=404)
+            # A. Realiza Login no Portal Principal (para pegar os cookies de sessão)
+            # Nota: O login geralmente é no domínio principal, mas os cookies devem permitir acesso ao inlabs.
+            await client.get("https://www.in.gov.br/acesso.do") 
+            payload = {"j_username": email, "j_password": senha, "entrar": "Entrar"}
+            login_resp = await client.post(
+                "https://www.in.gov.br/login_p_p_id_58_INSTANCE_942k_", 
+                data=payload
+            )
+            
+            if "Falha ao entrar" in login_resp.text:
+                 return Response(content="Falha no Login InLabs. Verifique senha.", status_code=401)
 
-        # 3. Acha o link do PDF
-        pdf_url = pick_pdf_link_from_listing(html, listing_url, section)
-        if not pdf_url:
-            return Response(content=f"Arquivo PDF da seção {section} não encontrado na pasta.", status_code=404)
-        
-        # 4. Baixa o conteúdo (Download Server-Side)
-        print(f"Baixando: {pdf_url}")
-        r = await client.get(pdf_url, timeout=90) # Timeout maior pois PDF pode ser grande
-        if r.status_code != 200:
-             return Response(content="Erro ao baixar o arquivo do servidor InLabs.", status_code=502)
-        
-        # 5. Entrega para o usuário
-        filename = f"DOU_{section.upper()}_{date}.pdf"
-        return Response(
-            content=r.content,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
+            # B. Baixa o Arquivo Direto
+            async with client.stream("GET", direct_url) as r_pdf:
+                if r_pdf.status_code != 200:
+                    # Se der 404, o arquivo ainda não foi gerado ou o padrão mudou
+                    return Response(content=f"Arquivo não encontrado no InLabs (Erro {r_pdf.status_code}). URL: {direct_url}", status_code=404)
+                
+                # Lê o conteúdo
+                body_content = await r_pdf.aread()
+                
+                # Verifica se o que veio é realmente um PDF (as vezes vem um HTML de erro mascarado)
+                if b"%PDF" not in body_content[:10]:
+                    return Response(content="O InLabs retornou um arquivo que não é PDF (possível erro de permissão ou arquivo corrompido).", status_code=502)
 
-    except Exception as e:
-        return Response(content=f"Erro interno: {str(e)}", status_code=500)
-    finally:
-        await client.aclose()
+                # C. Entrega para o navegador
+                return Response(
+                    content=body_content,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": f"attachment; filename={filename}",
+                        "Content-Length": str(len(body_content))
+                    }
+                )
+
+        except Exception as e:
+            print(f"Erro Download Direto: {e}")
+            return Response(content=f"Erro interno: {str(e)}", status_code=500)
 # =====================================================================================
 # INICIALIZAÇÃO E CONFIGURAÇÕES
 # =====================================================================================
