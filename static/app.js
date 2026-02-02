@@ -24,29 +24,37 @@ document.addEventListener("DOMContentLoaded", function() {
   })();
 
   // --- 1. Lógica do Botão PDF (Site Oficial) ---
- if (btnBaixarPdf) {
-    btnBaixarPdf.addEventListener('click', () => {
+ // [TRECHO DO app.js ATUALIZADO]
+
+const btnBaixarPdf = document.getElementById('btnBaixarPdf');
+if (btnBaixarPdf) {
+    btnBaixarPdf.addEventListener('click', (e) => {
+        // Previne que o link (href="#") recarregue a página ou abra aba vazia
+        e.preventDefault(); 
+
         const dateInput = document.getElementById('dataDou');
-        const dateVal = dateInput.value; // YYYY-MM-DD
+        const dateVal = dateInput.value; // Formato YYYY-MM-DD
         
         if (!dateVal) {
             alert('Por favor, selecione uma data primeiro.');
             return;
         }
 
-        // Feedback visual simples (opcional)
+        // Feedback visual para o usuário saber que o clique funcionou
         const originalText = btnBaixarPdf.innerText;
-        btnBaixarPdf.innerText = "Baixando...";
-        btnBaixarPdf.disabled = true;
+        btnBaixarPdf.innerText = "Baixando do InLabs...";
+        btnBaixarPdf.style.opacity = "0.7";
+        btnBaixarPdf.style.pointerEvents = "none"; // Evita clique duplo
 
-        // Chama a rota do Backend em uma nova aba.
-        // O browser vai entender o header "attachment" e iniciar o download.
+        // Chama a rota do Backend (Proxy). 
+        // O navegador vai entender o cabeçalho de download e baixar o arquivo.
         window.location.href = `/download-pdf-inlabs?date=${dateVal}&section=do1`;
 
-        // Restaura o botão após alguns segundos (já que não temos callback do download via window.location)
+        // Restaura o botão após 5 segundos (tempo estimado para o download iniciar)
         setTimeout(() => {
             btnBaixarPdf.innerText = originalText;
-            btnBaixarPdf.disabled = false;
+            btnBaixarPdf.style.opacity = "1";
+            btnBaixarPdf.style.pointerEvents = "auto";
         }, 5000);
     });
 }
