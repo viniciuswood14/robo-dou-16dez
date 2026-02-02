@@ -498,77 +498,67 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     body = main_article.find("body")
     if not body: return None
 
-    # Converta o objeto soup para string para usar Regex caso o parser falhe
+    # Transforma o objeto Article em String Bruta para aplicar Regex
+    # Isso ignora problemas de parsing do BeautifulSoup com CDATA/XML malformado
     raw_article_str = str(main_article)
 
-    # --- TÍTULO (IDENTIFICA) ---
+    # --- TÍTULO (IDENTIFICA) - VERSÃO BLINDADA ---
     act_type = ""
     
-    # Tentativa 1: Busca padrão BeautifulSoup
-    identifica_node = body.find("Identifica")
-    if identifica_node:
-        act_type = norm(identifica_node.get_text(" ", strip=True))
+    # Regex Agressivo: Aceita <Identifica>, <ns:Identifica>, <Identifica class="x">, etc.
+    # O [^>]* permite qualquer atributo. O re.DOTALL permite quebras de linha no conteúdo.
+    match_id = re.search(r"<(?:\w+:)?Identifica[^>]*>(.*?)</(?:\w+:)?Identifica>", raw_article_str, re.DOTALL | re.IGNORECASE)
     
-    # Tentativa 2: Busca por Classe HTML (alguns XMLs vêm assim)
+    if match_id:
+        content = match_id.group(1)
+        # Limpa CDATA e HTML interno (ex: <p>) de uma só vez
+        content = content.replace("<![CDATA[", "").replace("]]>", "")
+        act_type = norm(clean_html_text(content))
+    
+    # Fallback 1: Tenta classes HTML se o Regex XML falhar
     if not act_type:
         p_identifica = body.find("p", class_="identifica")
         if p_identifica:
             act_type = norm(p_identifica.get_text(" ", strip=True))
 
-    # Tentativa 3: Força Bruta (Regex) - Pega o que estiver dentro de <Identifica>...</Identifica>
-    if not act_type:
-        # Procura por: <Identifica> (qualquer coisa, inclusive CDATA) </Identifica>
-        match = re.search(r"<Identifica>(.*?)</Identifica>", raw_article_str, re.DOTALL | re.IGNORECASE)
-        if match:
-            content = match.group(1)
-            # Remove a sujeira do CDATA se o Regex pegou
-            content = content.replace("<![CDATA[", "").replace("]]>", "")
-            act_type = norm(clean_html_text(content))
-
-    # Fallback final
+    # Fallback 2: Atributos do artigo (Último caso)
     if not act_type:
         act_type = norm(main_article.get("name", "")) or norm(main_article.get("artType", "Ato Administrativo"))
     
     if not act_type: return None
     
 
-    # --- EMENTA (RESUMO) ---
+    # --- EMENTA (RESUMO) - VERSÃO BLINDADA ---
     summary = ""
     
-    # Tentativa 1: Busca padrão BeautifulSoup
-    ementa_node = body.find("Ementa")
-    if ementa_node:
-        summary = norm(ementa_node.get_text(" ", strip=True))
+    # Regex Agressivo para Ementa
+    match_em = re.search(r"<(?:\w+:)?Ementa[^>]*>(.*?)</(?:\w+:)?Ementa>", raw_article_str, re.DOTALL | re.IGNORECASE)
+    
+    if match_em:
+        content = match_em.group(1)
+        content = content.replace("<![CDATA[", "").replace("]]>", "")
+        summary = norm(clean_html_text(content))
 
-    # Tentativa 2: Busca por Classe HTML
+    # Fallback 1: Classe HTML
     if not summary:
         p_ementa = body.find("p", class_="ementa")
         if p_ementa:
             summary = norm(p_ementa.get_text(" ", strip=True))
-
-    # Tentativa 3: Força Bruta (Regex)
-    if not summary:
-        match = re.search(r"<Ementa>(.*?)</Ementa>", raw_article_str, re.DOTALL | re.IGNORECASE)
-        if match:
-            content = match.group(1)
-            content = content.replace("<![CDATA[", "").replace("]]>", "")
-            summary = norm(clean_html_text(content))
             
-    # Texto completo (para o parser da IA)
+    # Texto completo (para o parser da IA e Keywords)
     display_text = norm(body.get_text(" ", strip=True))
     
-    # Fallback de Ementa (se tudo falhar, tenta achar "EMENTA:" no corpo ou pega o início)
+    # Fallback 2: Busca por "EMENTA:" no texto ou pega as primeiras linhas
     if not summary:
         match = re.search(r"EMENTA:(.*?)(Vistos|ACORDAM|RESOLVE)", display_text, re.DOTALL | re.I)
         if match: 
             summary = norm(match.group(1))
         else: 
-            # Se não tiver ementa explicita, usa a função de fallback (primeiras linhas)
             summary = extract_fallback_summary(display_text)
     
     # --- FIM DA CORREÇÃO ---
     
-    # Lógica de Relevância (Mantida)
+    # Lógica de Relevância (Mantida idêntica)
     is_relevant = False
     reason = None
     search_content_lower = norm(full_text_content).lower()
