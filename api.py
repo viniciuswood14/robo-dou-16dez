@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import asyncio
 import httpx
 from bs4 import BeautifulSoup
+from fastapi.responses import Response # Importante para enviar o PDF binário
 
 # IA / Gemini
 import google.generativeai as genai
@@ -131,7 +132,64 @@ async def logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("corm_session")
     return response
+def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: str) -> Optional[str]:
+    """Encontra o link do PDF (ex: DO1.pdf) dentro da listagem do InLabs."""
+    soup = BeautifulSoup(html, "html.parser")
+    target = section_key.upper() # ex: "DO1"
+    
+    candidates = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        # Procura por .pdf e pelo nome da seção (DO1, DO2, DO3)
+        if href.lower().endswith(".pdf"):
+            if target in href.upper() or target in a.get_text().upper():
+                return urljoin(base_url_for_rel, href)
+    return None
+# --- ADICIONE NO FINAL DO ARQUIVO (Antes do @app.on_event ou onde preferir) ---
+@app.get("/download-pdf-inlabs")
+async def download_pdf_inlabs(date: str, section: str = "do1"):
+    """
+    Baixa o PDF do InLabs (autenticado) e repassa para o usuário.
+    """
+    print(f">>> Solicitado PDF InLabs: {date} ({section})")
+    
+    # 1. Autentica
+    try:
+        client = await inlabs_login_and_get_session()
+    except Exception as e:
+        return Response(content=f"Erro de Login InLabs: {str(e)}", status_code=500)
 
+    try:
+        # 2. Acha a pasta da data
+        try:
+            listing_url = await resolve_date_url(client, date)
+            html = await fetch_listing_html(client, date)
+        except Exception:
+            return Response(content="Data não encontrada ou ainda não publicada no InLabs.", status_code=404)
+
+        # 3. Acha o link do PDF
+        pdf_url = pick_pdf_link_from_listing(html, listing_url, section)
+        if not pdf_url:
+            return Response(content=f"Arquivo PDF da seção {section} não encontrado na pasta.", status_code=404)
+        
+        # 4. Baixa o conteúdo (Download Server-Side)
+        print(f"Baixando: {pdf_url}")
+        r = await client.get(pdf_url, timeout=90) # Timeout maior pois PDF pode ser grande
+        if r.status_code != 200:
+             return Response(content="Erro ao baixar o arquivo do servidor InLabs.", status_code=502)
+        
+        # 5. Entrega para o usuário
+        filename = f"DOU_{section.upper()}_{date}.pdf"
+        return Response(
+            content=r.content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except Exception as e:
+        return Response(content=f"Erro interno: {str(e)}", status_code=500)
+    finally:
+        await client.aclose()
 # =====================================================================================
 # INICIALIZAÇÃO E CONFIGURAÇÕES
 # =====================================================================================
