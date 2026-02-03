@@ -171,16 +171,22 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
 #  ROTAS PARA DOWNLOAD DO PDF (INLABS - CAMUFLADO)
 # ==========================================
 
+# ==========================================
+#  ROTAS PARA DOWNLOAD DO PDF (TÁTICA VISITANTE)
+# ==========================================
+
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
     """
-    Baixa o PDF usando Headers de Navegador para evitar desconexão.
+    Baixa o PDF simulando um usuário real:
+    1. Loga
+    2. Abre a página de leitura (Gera Cookie de Sessão do InLabs)
+    3. Baixa o arquivo
     """
-    print(f">>> [Direct PDF] Iniciando download: {date} ({section})")
+    print(f">>> [PDF InLabs] Iniciando fluxo para: {date} ({section})")
     
-    # 1. Configura Login
+    # 1. Configura Login (Fallback seguro)
     if "CONFIG" not in globals():
-        # Fallback de segurança caso o CONFIG não tenha carregado no topo
         email = os.getenv("INLABS_EMAIL")
         senha = os.getenv("INLABS_PASSWORD")
     else:
@@ -190,34 +196,36 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
     if not email or not senha:
         return Response(content="Credenciais InLabs não configuradas.", status_code=500)
 
-    # 2. Monta a URL
+    # 2. Prepara URLs
     try:
         dt_obj = datetime.strptime(date, "%Y-%m-%d")
-        param_p = dt_obj.strftime("%Y-%m-%d")
+        data_pt = dt_obj.strftime("%d-%m-%Y")     # 02-02-2026
+        param_p = dt_obj.strftime("%Y-%m-%d")     # 2026-02-02
+        
+        # Nome do arquivo (Seção minúscula)
         sec_code = section.lower()
         filename = f"{dt_obj.strftime('%Y_%m_%d')}_ASSINADO_{sec_code}.pdf"
         
-        # URL Direta
-        direct_url = f"https://inlabs.in.gov.br/index.php?p={param_p}&dl={filename}"
-        print(f">>> [Direct PDF] URL Alvo: {direct_url}")
+        # URL da Página de Leitura (Obrigatório visitar antes!)
+        url_leitura = f"https://www.in.gov.br/leiturajornal?data={data_pt}&secao={section}"
+        
+        # URL do Download Direto
+        url_download = f"https://inlabs.in.gov.br/index.php?p={param_p}&dl={filename}"
         
     except Exception as e:
-        return Response(content=f"Erro URL: {str(e)}", status_code=400)
+        return Response(content=f"Erro data: {str(e)}", status_code=400)
 
-    # 3. Cabeçalhos para fingir ser um Chrome (ESSENCIAL)
+    # 3. Cabeçalhos de Navegador Real (Chrome)
     headers_fake = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://inlabs.in.gov.br/",
-        "Connection": "keep-alive"
+        "Referer": "https://www.in.gov.br/", # Importante!
+        "Upgrade-Insecure-Requests": "1"
     }
 
-    # 4. Executa o Download
-    # verify=False ajuda a evitar erros de SSL comuns em sites gov.br
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True, verify=False, headers=headers_fake) as client:
+    async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False, headers=headers_fake) as client:
         try:
-            # A. Login (com headers de navegador)
+            # PASSO A: Login no Portal Principal
+            print(">>> [1/3] Logando...")
             await client.get("https://www.in.gov.br/acesso.do") 
             
             payload = {"j_username": email, "j_password": senha, "entrar": "Entrar"}
@@ -229,38 +237,58 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             if "Falha ao entrar" in login_resp.text:
                  return Response(content="Falha no Login InLabs. Verifique senha.", status_code=401)
 
-            # B. Baixa o Arquivo
-            print(">>> [Direct PDF] Requisitando arquivo...")
-            async with client.stream("GET", direct_url) as r_pdf:
+            # PASSO B: "Visitar" a página de leitura
+            # Isso é CRUCIAL. O InLabs só libera o download se tiver o cookie gerado aqui.
+            print(f">>> [2/3] Visitando página de leitura para validar sessão: {url_leitura}")
+            resp_leitura = await client.get(url_leitura)
+            
+            # Pequeno delay para garantir que o servidor processou a sessão (igual humano lendo)
+            await asyncio.sleep(1) 
+
+            # PASSO C: Baixar o Arquivo
+            print(f">>> [3/3] Baixando PDF: {url_download}")
+            
+            # Atualiza o Referer para parecer que veio da página de leitura
+            client.headers["Referer"] = url_leitura 
+            
+            async with client.stream("GET", url_download) as r_pdf:
                 if r_pdf.status_code != 200:
-                    return Response(content=f"Erro {r_pdf.status_code} ao baixar arquivo. Link: {direct_url}", status_code=404)
+                    return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo. Link pode ter expirado ou mudado.", status_code=404)
                 
-                # Lê o conteúdo para memória
                 body_content = await r_pdf.aread()
                 
-                # Verifica validade básica
-                if len(body_content) < 1000:
-                    # Se veio muito pequeno, pode ser página de erro mascarada
-                    texto_erro = body_content.decode('utf-8', errors='ignore')
-                    if "html" in texto_erro.lower():
-                        return Response(content=f"O InLabs retornou uma página HTML em vez do PDF. Provável erro de sessão ou arquivo inexistente.", status_code=502)
-
-                print(f">>> [Direct PDF] Sucesso! Tamanho: {len(body_content)} bytes")
+                # VERIFICAÇÃO DE INTEGRIDADE
+                tamanho = len(body_content)
+                print(f">>> Tamanho do arquivo baixado: {tamanho} bytes")
                 
-                # C. Entrega
+                # Se for menor que 20KB, com certeza é erro HTML
+                if tamanho < 20000: 
+                    # Tenta ler o erro
+                    texto_erro = body_content.decode('utf-8', errors='ignore')
+                    titulo_erro = "Erro desconhecido"
+                    if "<title>" in texto_erro:
+                        start = texto_erro.find("<title>") + 7
+                        end = texto_erro.find("</title>")
+                        titulo_erro = texto_erro[start:end]
+                    
+                    return Response(
+                        content=f"ERRO: O InLabs bloqueou o download. O arquivo baixado é uma página HTML de erro. (Título: {titulo_erro}). Tente novamente em instantes.",
+                        status_code=502
+                    )
+
+                # Se passou, entrega o PDF real
                 return Response(
                     content=body_content,
                     media_type="application/pdf",
                     headers={
                         "Content-Disposition": f"attachment; filename={filename}",
-                        "Content-Length": str(len(body_content))
+                        "Content-Length": str(tamanho)
                     }
                 )
 
         except Exception as e:
-            print(f"Erro Crítico Download: {e}")
-            # Retorna o erro exato na tela para facilitar o debug
-            return Response(content=f"Erro interno: {str(e)}", status_code=500)
+            print(f"Erro Crítico: {e}")
+            return Response(content=f"Erro interno no fluxo: {str(e)}", status_code=500)
 # =====================================================================================
 # INICIALIZAÇÃO E CONFIGURAÇÕES
 # =====================================================================================
