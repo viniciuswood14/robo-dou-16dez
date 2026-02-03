@@ -18,6 +18,17 @@ from fastapi.responses import Response
 from urllib.parse import urljoin
 import io
 
+# Carrega o arquivo de configuração globalmente
+try:
+    with open("config.json", "r", encoding="utf-8") as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    print("⚠️ Aviso: config.json não encontrado. O sistema tentará usar Variáveis de Ambiente.")
+    CONFIG = {}
+except Exception as e:
+    print(f"⚠️ Erro ao ler config.json: {e}")
+    CONFIG = {}
+
 # IA / Gemini
 import google.generativeai as genai
 
