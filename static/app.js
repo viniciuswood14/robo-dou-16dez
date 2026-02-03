@@ -26,13 +26,15 @@ document.addEventListener("DOMContentLoaded", function() {
   // --- 1. Lógica do Botão PDF (Site Oficial) ---
  // [TRECHO DO app.js ATUALIZADO]
 
+// --- CORREÇÃO PARA O app.js ---
+
 const btnBaixarPdf = document.getElementById('btnBaixarPdf');
 if (btnBaixarPdf) {
     btnBaixarPdf.addEventListener('click', (e) => {
-        // Previne que o link (href="#") recarregue a página ou abra aba vazia
-        e.preventDefault(); 
+        e.preventDefault(); // Impede comportamento padrão
 
-        const dateInput = document.getElementById('dataDou');
+        // CORREÇÃO: O ID correto no seu HTML é 'data', não 'dataDou'
+        const dateInput = document.getElementById('data'); 
         const dateVal = dateInput.value; // Formato YYYY-MM-DD
         
         if (!dateVal) {
@@ -40,17 +42,17 @@ if (btnBaixarPdf) {
             return;
         }
 
-        // Feedback visual para o usuário saber que o clique funcionou
+        // Feedback Visual
         const originalText = btnBaixarPdf.innerText;
-        btnBaixarPdf.innerText = "Baixando do InLabs...";
+        btnBaixarPdf.innerText = "⏳ Baixando do InLabs...";
         btnBaixarPdf.style.opacity = "0.7";
-        btnBaixarPdf.style.pointerEvents = "none"; // Evita clique duplo
+        btnBaixarPdf.style.pointerEvents = "none";
 
-        // Chama a rota do Backend (Proxy). 
-        // O navegador vai entender o cabeçalho de download e baixar o arquivo.
+        // Chama a rota do Backend (Proxy Direto)
+        // Isso vai acionar o download do arquivo 'YYYY_MM_DD_ASSINADO_do1.pdf'
         window.location.href = `/download-pdf-inlabs?date=${dateVal}&section=do1`;
 
-        // Restaura o botão após 5 segundos (tempo estimado para o download iniciar)
+        // Restaura o botão após 5 segundos
         setTimeout(() => {
             btnBaixarPdf.innerText = originalText;
             btnBaixarPdf.style.opacity = "1";
@@ -58,23 +60,6 @@ if (btnBaixarPdf) {
         }, 5000);
     });
 }
-
-      // Validação e conversão de formato
-      const parts = dataVal.split("-");
-      if (parts.length !== 3) {
-        alert("Data inválida.");
-        return;
-      }
-      
-      const [ano, mes, dia] = parts;
-      // O site do governo usa DD-MM-YYYY
-      const dataFormatada = `${dia}-${mes}-${ano}`;
-
-      // Abre a URL oficial da Seção 1 em nova aba
-      const url = `https://www.in.gov.br/leitura-jornal?data=${dataFormatada}&secao=do1`;
-      window.open(url, "_blank");
-    });
-  }
 
   // --- 2. Função central de processamento (Backend) ---
   async function handleProcessing(endpoint) {
