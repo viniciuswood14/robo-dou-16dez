@@ -3,39 +3,36 @@ document.addEventListener("DOMContentLoaded", function() {
   // 👉 Troque para a URL do seu backend no Render se necessário, ou deixe vazio para relativo:
   const API_BASE = "";
 
+  // Função auxiliar para pegar elementos pelo ID
   const el = (id) => document.getElementById(id);
   
-  // Elementos (Botões)
+  // --- 1. Mapeamento dos Elementos ---
   const btnProcessar = el("btnProcessar");
   const btnProcessarIA = el("btnProcessarIA");
   const btnProcessarValor = el("btnProcessarValor");
-  const btnBaixarPdf = document.getElementById('btnBaixarPdf');
+  const btnBaixarPdf = el("btnBaixarPdf");
   const btnCopiar = el("btnCopiar");
   
-  // Elementos (Inputs/Output)
+  // Inputs e Áreas de Texto
+  const dateInput = el("data");
+  const sectionsInput = el("sections");
+  const keywordsInput = el("keywords");
   const preview = el("preview");
 
-  // Valor padrão: hoje
+  // --- 2. Inicialização (Define data de hoje) ---
   (function initDate() {
     const today = new Date().toISOString().slice(0, 10);
-    if (el("data")) {
-      el("data").value = today;
+    if (dateInput) {
+      dateInput.value = today;
     }
   })();
 
-  // --- 1. Lógica do Botão PDF (Site Oficial) ---
- // [TRECHO DO app.js ATUALIZADO]
-
-// --- CORREÇÃO PARA O app.js ---
-
-const btnBaixarPdf = document.getElementById('btnBaixarPdf');
-if (btnBaixarPdf) {
+  // --- 3. Lógica do Botão BAIXAR PDF (InLabs) ---
+  if (btnBaixarPdf) {
     btnBaixarPdf.addEventListener('click', (e) => {
-        e.preventDefault(); // Impede comportamento padrão
+        e.preventDefault(); // Impede que o link recarregue a página
 
-        // CORREÇÃO: O ID correto no seu HTML é 'data', não 'dataDou'
-        const dateInput = document.getElementById('data'); 
-        const dateVal = dateInput.value; // Formato YYYY-MM-DD
+        const dateVal = dateInput ? dateInput.value : null;
         
         if (!dateVal) {
             alert('Por favor, selecione uma data primeiro.');
@@ -46,107 +43,112 @@ if (btnBaixarPdf) {
         const originalText = btnBaixarPdf.innerText;
         btnBaixarPdf.innerText = "⏳ Baixando do InLabs...";
         btnBaixarPdf.style.opacity = "0.7";
-        btnBaixarPdf.style.pointerEvents = "none";
+        btnBaixarPdf.style.pointerEvents = "none"; // Bloqueia clique duplo
 
         // Chama a rota do Backend (Proxy Direto)
         // Isso vai acionar o download do arquivo 'YYYY_MM_DD_ASSINADO_do1.pdf'
         window.location.href = `/download-pdf-inlabs?date=${dateVal}&section=do1`;
 
-        // Restaura o botão após 5 segundos
+        // Restaura o botão após 5 segundos (tempo estimado para o download iniciar)
         setTimeout(() => {
             btnBaixarPdf.innerText = originalText;
             btnBaixarPdf.style.opacity = "1";
             btnBaixarPdf.style.pointerEvents = "auto";
         }, 5000);
     });
-}
+  }
 
-  // --- 2. Função central de processamento (Backend) ---
+  // --- 4. Função Central de Processamento (Backend) ---
   async function handleProcessing(endpoint) {
-    const data = el("data").value.trim();
-    const sections = el("sections").value.trim() || "DO1,DO2";
-    const keywords = el("keywords").value.trim();
-
-    if (!data) {
+    if (!dateInput || !dateInput.value) {
       if(preview) preview.textContent = "Informe a data (YYYY-MM-DD).";
+      alert("Informe a data!");
       return;
     }
 
-    const fd = new FormData();
-    fd.append("data", data);
-    
+    const dataVal = dateInput.value.trim();
+    const sectionsVal = sectionsInput ? sectionsInput.value.trim() : "DO1,DO2";
+    const keywordsVal = keywordsInput ? keywordsInput.value.trim() : "";
+
+    // UI: Prepara para carregar
     let loadingText = "Processando, aguarde…";
-
-    // Configuração para rotas do DOU
-    if (endpoint.startsWith("/processar-dou") || 
-        endpoint.startsWith("/processar-inlabs")) {
-      
-      fd.append("sections", sections);
-      
-      if (keywords) {
-        const keywordsList = keywords.split(',')
-          .map(k => k.trim())
-          .filter(k => k.length > 0);
-          
-        if (keywordsList.length > 0) {
-          fd.append("keywords_json", JSON.stringify(keywordsList));
-        }
-      }
-      
-      if(endpoint.includes("-ia")) {
-        loadingText = "Processando DOU com IA no INLABS. Isso pode levar até 2 minutos, aguarde…";
-      } else {
-        loadingText = "Processando DOU (Rápido) no INLABS, aguarde…";
-      }
-    }
     
-    // Configuração para rota do Valor
-    if (endpoint.startsWith("/processar-valor")) {
-        loadingText = "Buscando notícias no Valor Econômico e analisando com IA, aguarde…";
+    // Personaliza mensagem de carregamento
+    if(endpoint.includes("processar-dou-ia")) {
+       loadingText = "🤖 Processando DOU com IA no INLABS. Isso pode levar até 2 minutos...";
+    } else if(endpoint.includes("processar-valor")) {
+       loadingText = "📰 Buscando notícias no Valor Econômico e analisando com IA...";
+    } else {
+       loadingText = "🔎 Processando DOU (Rápido) no INLABS...";
     }
-
-    // Desabilita botões que dependem do backend durante o processamento
-    if (btnProcessar) btnProcessar.disabled = true;
-    if (btnProcessarIA) btnProcessarIA.disabled = true;
-    if (btnProcessarValor) btnProcessarValor.disabled = true;
-    if (btnCopiar) btnCopiar.disabled = true;
-    // Nota: O btnBaixarPdf não é desabilitado pois não depende do backend
 
     if (preview) {
       preview.classList.add("loading");
       preview.textContent = loadingText;
     }
 
+    // Desabilita botões para evitar cliques múltiplos
+    toggleButtons(true);
+
     try {
+      const fd = new FormData();
+      fd.append("data", dataVal);
+
+      // Lógica específica para endpoints do DOU
+      if (endpoint.includes("processar-dou") || endpoint.includes("processar-inlabs")) {
+        fd.append("sections", sectionsVal);
+        
+        if (keywordsVal) {
+          const keywordsList = keywordsVal.split(',')
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+            
+          if (keywordsList.length > 0) {
+            fd.append("keywords_json", JSON.stringify(keywordsList));
+          }
+        }
+      }
+
+      // Envia a requisição
       const res = await fetch(`${API_BASE}${endpoint}`, { method: "POST", body: fd }); 
       const body = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        if(preview) preview.textContent = body?.detail
-          ? `Erro: ${body.detail}`
-          : `Erro HTTP ${res.status}`;
-        return;
+        throw new Error(body.detail || `Erro HTTP ${res.status}`);
       }
 
-      const texto = body?.whatsapp_text || "(Sem resultados)";
-      if (preview) preview.textContent = texto;
+      const texto = body.whatsapp_text || "(Sem resultados relevantes encontrados para os filtros aplicados)";
+      
+      if (preview) {
+          preview.textContent = texto;
+          // Se quiser renderizar HTML (negrito, quebras de linha reais):
+          // preview.innerHTML = texto.replace(/\n/g, "<br>"); 
+      }
 
+      // Habilita botão de copiar se houver texto
       if (btnCopiar) {
         btnCopiar.disabled = !texto || texto === "(Sem resultados)";
       }
 
     } catch (err) {
       if (preview) preview.textContent = `Falha na requisição: ${err.message || err}`;
+      console.error(err);
     } finally {
-      // Reabilita botões
-      if (btnProcessar) btnProcessar.disabled = false;
-      if (btnProcessarIA) btnProcessarIA.disabled = false;
-      if (btnProcessarValor) btnProcessarValor.disabled = false;
+      // Reabilita botões e remove loading
+      toggleButtons(false);
       if (preview) preview.classList.remove("loading");
     }
   }
 
-  // --- 3. Listeners dos botões de processamento ---
+  // Função auxiliar para travar/destravar botões
+  function toggleButtons(disabled) {
+    if (btnProcessar) btnProcessar.disabled = disabled;
+    if (btnProcessarIA) btnProcessarIA.disabled = disabled;
+    if (btnProcessarValor) btnProcessarValor.disabled = disabled;
+    if (btnCopiar) btnCopiar.disabled = disabled;
+  }
+
+  // --- 5. Listeners dos Botões de Ação ---
   if (btnProcessar) {
     btnProcessar.addEventListener("click", () => handleProcessing("/processar-inlabs"));
   }
@@ -157,7 +159,7 @@ if (btnBaixarPdf) {
     btnProcessarValor.addEventListener("click", () => handleProcessing("/processar-valor-ia"));
   }
   
-  // --- 4. Botão Copiar (Com feedback visual) ---
+  // --- 6. Botão Copiar (Com feedback visual) ---
   if (btnCopiar) {
     btnCopiar.addEventListener("click", async () => {
       try {
