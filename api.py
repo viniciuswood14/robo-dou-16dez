@@ -162,10 +162,7 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
 # ==========================================
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
-    """
-    Baixa o PDF simulando um usuário real (Chrome/Windows) com headers completos.
-    """
-    print(f">>> [PDF InLabs - Stealth] Iniciando fluxo para: {date} ({section})")
+    print(f">>> [PDF InLabs] Iniciando fluxo para: {date} ({section})")
     
     # 1. Configura Login
     if "CONFIG" not in globals():
@@ -178,7 +175,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
     if not email or not senha:
         return Response(content="Credenciais InLabs não configuradas.", status_code=500)
 
-    # 2. Prepara URLs (Lógica original mantida)
+    # 2. Prepara URLs
     try:
         dt_obj = datetime.strptime(date, "%Y-%m-%d")
         data_pt = dt_obj.strftime("%d-%m-%Y")
@@ -193,40 +190,27 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
     except Exception as e:
         return Response(content=f"Erro data: {str(e)}", status_code=400)
 
-    # 3. Cabeçalhos de "Alta Fidelidade" (Chrome v121+ no Windows)
-    # Esses headers 'Sec-' são cruciais para não ser barrado.
+    # 3. Cabeçalhos Blindados (Chrome/Windows)
+    # Adicionei os headers 'Sec-' que são vitais para passar no firewall do governo
     headers_fake = {
-        "Host": "www.in.gov.br",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
         "Referer": "https://www.in.gov.br/",
-        "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
-        # Headers de Client Hints (Disfarce moderno do Chrome)
         "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-User": "?1"
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document"
     }
 
-    # verify=False ajuda a evitar erros de handshake SSL do governo
     async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False, headers=headers_fake) as client:
         try:
             # PASSO A: Login no Portal Principal
-            print(">>> [1/3] Logando...")
-            # Visita a home primeiro para pegar cookies iniciais (JSESSIONID)
-            await client.get("https://www.in.gov.br/acesso.do")
+            print(">>> [1/4] Logando...")
+            await client.get("https://www.in.gov.br/acesso.do") 
             
             payload = {"j_username": email, "j_password": senha, "entrar": "Entrar"}
-            
-            # Ajuste fino: O POST de login geralmente é 'same-origin'
-            client.headers["Origin"] = "https://www.in.gov.br" 
-            
             login_resp = await client.post(
                 "https://www.in.gov.br/login_p_p_id_58_INSTANCE_942k_", 
                 data=payload
@@ -234,50 +218,38 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             
             if "Falha ao entrar" in login_resp.text:
                  return Response(content="Falha no Login InLabs. Verifique senha.", status_code=401)
-            
-            # Remove o Origin após o POST para não atrapalhar os GETs seguintes
-            del client.headers["Origin"]
 
-            # PASSO B: "Visitar" a página de leitura
-            print(f">>> [2/3] Validando sessão em: {url_leitura}")
-            
-            # Atualiza Referer e Host para garantir consistência
-            client.headers["Referer"] = "https://www.in.gov.br/acesso.do"
-            
-            resp_leitura = await client.get(url_leitura)
-            await asyncio.sleep(1.5) # Delay um pouco maior, mais natural
+            # PASSO B: Validar Sessão na Leitura
+            print(f">>> [2/4] Validando sessão em: {url_leitura}")
+            await client.get(url_leitura)
+            await asyncio.sleep(1) 
 
-            # PASSO C: Baixar o Arquivo
-            print(f">>> [3/3] Baixando PDF: {url_download}")
+            # --- NOVO PASSO C (CRÍTICO): Handshake no domínio do InLabs ---
+            # Visitamos a raiz do inlabs para ele pegar o cookie e criar a sessão PHP
+            print(">>> [3/4] Handshake de sessão (InLabs)...")
+            client.headers["Sec-Fetch-Site"] = "same-site" # Mudança de domínio
+            await client.get("https://inlabs.in.gov.br/index.php")
+            await asyncio.sleep(1)
+
+            # PASSO D: Baixar o Arquivo
+            print(f">>> [4/4] Baixando PDF: {url_download}")
             
-            # --- PULO DO GATO: MUDANÇA DE DOMÍNIO ---
-            # O download é em 'inlabs.in.gov.br', não 'www.in.gov.br'.
-            # Precisamos ajustar o Host e o Referer para não parecer ataque CSRF.
-            
+            # Ajuste de headers para o download
+            client.headers["Referer"] = url_leitura 
             client.headers["Host"] = "inlabs.in.gov.br"
-            client.headers["Referer"] = url_leitura
-            client.headers["Sec-Fetch-Site"] = "same-site" # Mudou de www para inlabs (mesmo site, subdominio diferente)
             
             async with client.stream("GET", url_download) as r_pdf:
                 if r_pdf.status_code != 200:
-                    return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo. Link pode ter expirado ou mudado.", status_code=404)
+                    return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo.", status_code=404)
                 
                 body_content = await r_pdf.aread()
                 tamanho = len(body_content)
-                print(f">>> Tamanho do arquivo baixado: {tamanho} bytes")
+                print(f">>> Tamanho final: {tamanho} bytes")
                 
+                # Se ainda vier o erro de 6KB
                 if tamanho < 20000: 
-                    # Tenta ler o erro HTML para debug no console
-                    try:
-                        texto_erro = body_content.decode('utf-8', errors='ignore')
-                        if "<title>" in texto_erro:
-                            start = texto_erro.find("<title>") + 7
-                            end = texto_erro.find("</title>")
-                            print(f"ALERTA: Título da página de erro: {texto_erro[start:end]}")
-                    except: pass
-                    
                     return Response(
-                        content=f"ERRO: O InLabs bloqueou o download (retorno HTML de {tamanho}b).",
+                        content=f"ERRO: Bloqueio mantido. Retorno HTML de {tamanho}b. Tente novamente em 1 min.",
                         status_code=502
                     )
 
