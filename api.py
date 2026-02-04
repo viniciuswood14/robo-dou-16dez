@@ -190,8 +190,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
     except Exception as e:
         return Response(content=f"Erro data: {str(e)}", status_code=400)
 
-    # 3. Cabeçalhos Blindados (Chrome/Windows)
-    # Adicionei os headers 'Sec-' que são vitais para passar no firewall do governo
+    # 3. Cabeçalhos Blindados
     headers_fake = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Referer": "https://www.in.gov.br/",
@@ -224,17 +223,26 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             await client.get(url_leitura)
             await asyncio.sleep(1) 
 
-            # --- NOVO PASSO C (CRÍTICO): Handshake no domínio do InLabs ---
-            # Visitamos a raiz do inlabs para ele pegar o cookie e criar a sessão PHP
-            print(">>> [3/4] Handshake de sessão (InLabs)...")
-            client.headers["Sec-Fetch-Site"] = "same-site" # Mudança de domínio
+            # --- PASSO 2.5 (CRÍTICO): Clonagem de Cookies para o InLabs ---
+            # O servidor www define cookies apenas para 'www'. O 'inlabs' não os vê.
+            # Aqui forçamos a cópia manual dos cookies de sessão para o domínio 'inlabs.in.gov.br'
+            print(">>> [2.5/4] Clonando cookies para inlabs.in.gov.br...")
+            current_cookies = list(client.cookies.jar) # Pega cookies atuais (JSESSIONID, etc)
+            
+            for cookie in current_cookies:
+                # Se for cookie de sessão, injeta explicitamente para o domínio do inlabs
+                if cookie.name in ["JSESSIONID", "lb_in"] or "session" in cookie.name.lower():
+                    client.cookies.set(cookie.name, cookie.value, domain="inlabs.in.gov.br")
+            
+            # PASSO C: Handshake (Agora com cookies clonados)
+            print(">>> [3/4] Handshake com servidor de arquivos...")
+            client.headers["Sec-Fetch-Site"] = "same-site"
             await client.get("https://inlabs.in.gov.br/index.php")
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
-            # PASSO D: Baixar o Arquivo
+            # PASSO D: Download
             print(f">>> [4/4] Baixando PDF: {url_download}")
             
-            # Ajuste de headers para o download
             client.headers["Referer"] = url_leitura 
             client.headers["Host"] = "inlabs.in.gov.br"
             
@@ -246,10 +254,19 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
                 tamanho = len(body_content)
                 print(f">>> Tamanho final: {tamanho} bytes")
                 
-                # Se ainda vier o erro de 6KB
                 if tamanho < 20000: 
+                    # Debug: Mostra o que veio dentro do arquivo de erro
+                    try:
+                        texto = body_content.decode('utf-8', errors='ignore')
+                        # Pega o título da página para sabermos o erro exato
+                        titulo = "Sem Título"
+                        if "<title>" in texto:
+                            titulo = texto.split("<title>")[1].split("</title>")[0]
+                        print(f">>> CONTEÚDO ERRO (Título): {titulo}")
+                    except: pass
+
                     return Response(
-                        content=f"ERRO: Bloqueio mantido. Retorno HTML de {tamanho}b. Tente novamente em 1 min.",
+                        content=f"ERRO: Bloqueio mantido (Arquivo muito pequeno: {tamanho}b).",
                         status_code=502
                     )
 
