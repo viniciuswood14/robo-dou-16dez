@@ -162,7 +162,7 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
 # ==========================================
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
-    print(f">>> [PDF InLabs] Iniciando fluxo para: {date} ({section})")
+    print(f">>> [PDF InLabs Force] Iniciando fluxo para: {date} ({section})")
     
     # 1. Configura Login
     if "CONFIG" not in globals():
@@ -190,8 +190,8 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
     except Exception as e:
         return Response(content=f"Erro data: {str(e)}", status_code=400)
 
-    # 3. Cabeçalhos Blindados
-    headers_fake = {
+    # 3. Headers Base (Chrome)
+    headers_base = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Referer": "https://www.in.gov.br/",
         "Upgrade-Insecure-Requests": "1",
@@ -203,7 +203,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
         "Sec-Fetch-Dest": "document"
     }
 
-    async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False, headers=headers_fake) as client:
+    async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False, headers=headers_base) as client:
         try:
             # PASSO A: Login no Portal Principal
             print(">>> [1/4] Logando...")
@@ -221,32 +221,35 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             # PASSO B: Validar Sessão na Leitura
             print(f">>> [2/4] Validando sessão em: {url_leitura}")
             await client.get(url_leitura)
-            await asyncio.sleep(1) 
+            await asyncio.sleep(1)
 
-            # --- PASSO 2.5 (CRÍTICO): Clonagem de Cookies para o InLabs ---
-            # O servidor www define cookies apenas para 'www'. O 'inlabs' não os vê.
-            # Aqui forçamos a cópia manual dos cookies de sessão para o domínio 'inlabs.in.gov.br'
-            print(">>> [2.5/4] Clonando cookies para inlabs.in.gov.br...")
-            current_cookies = list(client.cookies.jar) # Pega cookies atuais (JSESSIONID, etc)
+            # --- PASSO C (NUCLEAR): Extração e Injeção Manual de Cookies ---
+            # Pegamos TODOS os cookies que temos agora (do www) e criamos uma string única
+            print(">>> [3/4] Construindo Header de Cookie Unificado...")
             
-            for cookie in current_cookies:
-                # Se for cookie de sessão, injeta explicitamente para o domínio do inlabs
-                if cookie.name in ["JSESSIONID", "lb_in"] or "session" in cookie.name.lower():
-                    client.cookies.set(cookie.name, cookie.value, domain="inlabs.in.gov.br")
+            # Pega cookies do Jar
+            cookies_dict = {c.name: c.value for c in client.cookies.jar}
             
-            # PASSO C: Handshake (Agora com cookies clonados)
-            print(">>> [3/4] Handshake com servidor de arquivos...")
-            client.headers["Sec-Fetch-Site"] = "same-site"
-            await client.get("https://inlabs.in.gov.br/index.php")
-            await asyncio.sleep(0.5)
-
-            # PASSO D: Download
-            print(f">>> [4/4] Baixando PDF: {url_download}")
+            # Monta string "Cookie: nome=valor; nome2=valor2"
+            cookie_header_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
             
-            client.headers["Referer"] = url_leitura 
-            client.headers["Host"] = "inlabs.in.gov.br"
+            print(f">>> Cookies capturados: {list(cookies_dict.keys())}")
             
-            async with client.stream("GET", url_download) as r_pdf:
+            # Define headers ESPECÍFICOS para o download, sobrescrevendo os automáticos
+            download_headers = headers_base.copy()
+            download_headers["Cookie"] = cookie_header_str # FORÇA BRUTA: Envia os cookies do www para o inlabs
+            download_headers["Host"] = "inlabs.in.gov.br"
+            download_headers["Referer"] = url_leitura
+            download_headers["Sec-Fetch-Site"] = "same-site"
+            
+            # Removemos o CookieJar do request específico para ele não sobrescrever nosso header manual
+            # Usamos client.build_request para ter controle total
+            
+            print(f">>> [4/4] Baixando PDF (Forced Cookies): {url_download}")
+            
+            request = client.build_request("GET", url_download, headers=download_headers)
+            
+            async with client.send(request, stream=True) as r_pdf:
                 if r_pdf.status_code != 200:
                     return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo.", status_code=404)
                 
@@ -255,18 +258,14 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
                 print(f">>> Tamanho final: {tamanho} bytes")
                 
                 if tamanho < 20000: 
-                    # Debug: Mostra o que veio dentro do arquivo de erro
                     try:
                         texto = body_content.decode('utf-8', errors='ignore')
-                        # Pega o título da página para sabermos o erro exato
-                        titulo = "Sem Título"
-                        if "<title>" in texto:
-                            titulo = texto.split("<title>")[1].split("</title>")[0]
-                        print(f">>> CONTEÚDO ERRO (Título): {titulo}")
+                        titulo = texto.split("<title>")[1].split("</title>")[0] if "<title>" in texto else "Sem Título"
+                        print(f">>> CONTEÚDO ERRO: {titulo}")
                     except: pass
 
                     return Response(
-                        content=f"ERRO: Bloqueio mantido (Arquivo muito pequeno: {tamanho}b).",
+                        content=f"ERRO: O servidor rejeitou a sessão (Arquivo: {tamanho}b - {titulo}).",
                         status_code=502
                     )
 
