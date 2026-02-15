@@ -60,7 +60,12 @@ try:
 except ImportError:
     print("Aviso: 'dou_fallback.py' não encontrado. Redundância desativada.")
     executar_fallback = None
-
+# No topo do run_check.py, junto com as outras importações try/except
+try:
+    from check_legislativo import rotina_legislativa_completa
+except ImportError:
+    print("Aviso: 'check_legislativo.py' não encontrado ou função nova não definida.")
+    rotina_legislativa_completa = None
 
 # --- CONFIGURAÇÃO DO ESTADO (DOU) ---
 STATE_FILE_PATH = os.environ.get("STATE_FILE_PATH", "/dados/processed_state.json")
@@ -315,6 +320,10 @@ async def main_loop():
     
     valor_check_done = False
     pac_check_done = False
+    
+    # Controle de hora para o Legislativo (para não rodar a cada 10 min)
+    last_legis_hour = -1 
+    
     last_day = None
     
     print("--- Robô Integrado (Safety Mode + Heartbeat) Iniciado ---")
@@ -333,7 +342,6 @@ async def main_loop():
             print(f"*** Novo dia: {hoje_str} ***")
 
         # Horário de expediente EXPANDIDO (04h às 23h59)
-        # Horário de expediente (04h às 23h59)
         if 4 <= agora.hour <= 23:
             
             # 1. DOU (Roda a cada 10 min)
@@ -361,13 +369,19 @@ async def main_loop():
                 except Exception as e:
                     print(f"Erro PAC: {e}")
 
+            # 4. LEGISLATIVO (Rodar 1 vez por hora, a partir das 08h)
+            # Verifica se o módulo foi importado e se mudou a hora desde a última checagem
+            if rotina_legislativa_completa and agora.hour != last_legis_hour:
+                if agora.hour >= 8: # Evita rodar de madrugada quando não há sessões
+                    try:
+                        print(f"[{agora.strftime('%H:%M')}] Executando rotina legislativa...")
+                        await rotina_legislativa_completa()
+                        last_legis_hour = agora.hour # Atualiza flag para não rodar de novo nesta hora
+                    except Exception as e:
+                        print(f"Erro Legislativo: {e}")
+                        # Opcional: await send_telegram_message(f"⚠️ Erro Legislativo: {e}")
+
         else:
             print(f"[{agora.strftime('%H:%M')}] Fora de expediente. Dormindo.")
 
         await asyncio.sleep(INTERVALO_SEGUNDOS)
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main_loop())
-    except KeyboardInterrupt:
-        print("Robô parado.")
