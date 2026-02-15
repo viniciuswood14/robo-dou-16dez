@@ -409,3 +409,35 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
                 print(f"Erro busca manual Senado: {e}")
 
     return None # Não encontrou
+
+# --- Adicione isto ao final do arquivo check_legislativo.py ---
+
+async def rotina_legislativa_completa():
+    """
+    Função Wrapper para o Robô:
+    1. Busca novas proposições (Keywords).
+    2. Verifica atualizações na Watchlist (Tramitações).
+    3. Envia Telegram se houver novidades.
+    """
+    print(">>> Iniciando Rotina Legislativa Completa...")
+    
+    # 1. Verifica Novas Proposições (Já envia Telegram internamente se only_new=True)
+    await check_and_process_legislativo(only_new=True, days_back=3)
+    
+    # 2. Verifica Watchlist (Tramitações)
+    updates = await check_tramitacoes_watchlist()
+    
+    if updates:
+        print(f"Encontradas {len(updates)} atualizações na watchlist.")
+        msg = ["🏛️ *Atualização de Tramitação (Watchlist)*", ""]
+        for up in updates:
+            msg.append(f"📌 *{up['titulo']}*")
+            msg.append(f"📝 {up['ementa'][:100]}...")
+            msg.append(f"🔄 Status: {up['status']}")
+            msg.append(f"🔗 [Link]({up['link']})")
+            msg.append("")
+        
+        # Envia para o Telegram
+        await send_telegram_message("\n".join(msg))
+    else:
+        print("Nenhuma atualização na watchlist.")
