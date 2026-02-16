@@ -1,12 +1,12 @@
 # Nome do arquivo: check_legislativo.py
-# Versão: 10.0 (Production Mode - Monitoramento Ativo)
+# Versão: 10.1 (Fix: Save State after Send)
 
 import os
 import json
 import asyncio
 import httpx
 from datetime import datetime, timedelta
-from typing import List, Set, Dict
+from typing import List, Set, Dict, Tuple
 
 # Tenta importar o módulo de telegram, se não existir, cria um mock para não quebrar
 try:
@@ -14,16 +14,12 @@ try:
 except ImportError:
     async def send_telegram_message(msg):
         print(f"[TELEGRAM MOCK] {msg}")
+        return True
 
 # --- CONFIGURAÇÃO ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def _resolve_data_path(env_var: str, default_filename: str) -> str:
-    """
-    Resolve o caminho dos arquivos de estado com prioridade para variável de ambiente.
-    Sem override, fixa em caminho absoluto ao lado deste módulo para evitar
-    inconsistências quando o processo é iniciado em diretórios diferentes.
-    """
     custom_path = os.environ.get(env_var)
     if custom_path:
         return custom_path
@@ -75,7 +71,6 @@ async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Di
     print(f">>> [API Câmara] Iniciando varredura ({days_back_int} dias)...")
     results = []
     
-    # Define janela de tempo
     dt_inicio = (datetime.now() - timedelta(days=days_back_int)).strftime("%Y-%m-%d")
     dt_fim = datetime.now().strftime("%Y-%m-%d")
     
@@ -87,7 +82,6 @@ async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Di
         "ordenarPor": "id"
     }
     
-    # Cabeçalho para evitar bloqueio
     headers = {"Accept": "application/json", "User-Agent": "MonitorLegislativoMB/1.0"}
 
     try:
@@ -99,14 +93,12 @@ async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Di
 
         data = resp.json()
         itens = data.get("dados", [])
-        print(f"   -> [Câmara] Analisando {len(itens)} itens recentes...")
-
+        
         for item in itens:
             sigla = item.get("siglaTipo")
             if sigla not in CAMARA_SIGLAS:
                 continue
 
-            # A ementa na listagem inicial as vezes é curta, mas serve para filtro primário
             ementa = item.get("ementa", "")
             found_kw = is_relevant(ementa)
             
@@ -136,9 +128,8 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
     headers = {"Accept": "application/json", "User-Agent": "MonitorLegislativoMB/1.0"}
     
     ano_atual = datetime.now().year
-    limit_date = datetime.now() - timedelta(days=days_back_int + 2) # Margem de segurança
+    limit_date = datetime.now() - timedelta(days=days_back_int + 2) 
 
-    # O Senado busca por Sigla + Ano. Varremos as siglas principais.
     for sigla in SENADO_SIGLAS:
         url = f"{URL_SENADO}?sigla={sigla}&ano={ano_atual}"
         try:
@@ -147,14 +138,12 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
                 continue
 
             data = resp.json()
-            # Navegação no JSON complexo do Senado
             raw_list = data.get("PesquisaBasicaMateria", {}).get("Materias", {}).get("Materia", [])
             if isinstance(raw_list, dict): raw_list = [raw_list]
             
             for mat in raw_list:
                 dados = mat.get("DadosBasicosMateria", {})
                 
-                # Filtro de Data
                 data_str = dados.get("DataApresentacao")
                 if not data_str: continue
                 try:
@@ -162,7 +151,6 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
                     if dt_obj < limit_date: continue
                 except: continue
 
-                # Filtro de Conteúdo
                 ementa = dados.get("EmentaMateria", "")
                 natureza = dados.get("NaturezaMateria", "")
                 full_text = f"{ementa} {natureza}"
@@ -187,46 +175,43 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
 
     return results
 
-# --- MAIN ---
+# --- MAIN: NOVAS PROPOSIÇÕES ---
 async def check_and_process_legislativo(only_new: bool = True, days_back: int = 5) -> List[Dict]:
     """
-    Função principal chamada pelo robô (api.py).
-    Se only_new=True, filtra pelo state e notifica no Telegram.
-    Se only_new=False, retorna tudo (para o Dashboard no site).
+    CORREÇÃO APLICADA: O estado só é salvo APÓS o envio da mensagem.
     """
     processed_ids = load_state()
     all_proposals = []
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        # Roda Câmara e Senado em paralelo
         task_cam = check_camara(client, days_back)
         task_sen = check_senado(client, days_back)
-        
         results = await asyncio.gather(task_cam, task_sen)
-        all_proposals.extend(results[0]) # Câmara
-        all_proposals.extend(results[1]) # Senado
+        all_proposals.extend(results[0]) 
+        all_proposals.extend(results[1]) 
 
-    # Ordena por data (mais recente primeiro)
     try:
         all_proposals.sort(key=lambda x: x.get('data', ''), reverse=True)
     except: pass
 
-    # Separa novidades para notificação
     new_for_telegram = []
+    # Identifica o que é novo, mas NÃO adiciona ao processed_ids ainda
+    ids_to_add = set()
+    
     for p in all_proposals:
         if p['uid'] not in processed_ids:
             new_for_telegram.append(p)
-            processed_ids.add(p['uid'])
+            ids_to_add.add(p['uid'])
 
-    # Salva estado atualizado
-    save_state(processed_ids)
+    # Se a chamada veio do SITE (only_new=False), retorna TUDO e não envia msg
+    if not only_new:
+        return all_proposals
 
-    # Notificação (apenas se solicitado)
-    if only_new and new_for_telegram:
+    # Se for rotina de notificação:
+    if new_for_telegram:
         print(f"Enviando {len(new_for_telegram)} novas proposições para o Telegram...")
         msg_header = "🏛️ *Monitoramento Legislativo (Novidades)*"
         
-        # Envia em blocos para não estourar limite do Telegram
         buffer_msg = [msg_header]
         for p in new_for_telegram:
             item_txt = (
@@ -237,18 +222,24 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
             )
             buffer_msg.append(item_txt)
         
-        await send_telegram_message("\n".join(buffer_msg))
-        return new_for_telegram
-
-    # Se a chamada veio do SITE (only_new=False), retorna TUDO (novos + velhos)
-    if not only_new:
-        return all_proposals
+        # TENTA ENVIAR
+        sent_success = await send_telegram_message("\n".join(buffer_msg))
+        
+        if sent_success:
+            # SUCESSO: Agora sim salva o estado
+            processed_ids.update(ids_to_add)
+            save_state(processed_ids)
+            print("✅ Estado salvo após envio com sucesso.")
+        else:
+            print("❌ Falha no envio para o Telegram. Estado NÃO foi salvo para tentar novamente.")
+    else:
+        # Se não tem nada novo, salva o estado atual (caso tenha havido leitura sem novidades)
+        # Isso é opcional, mas mantém o arquivo atualizado.
+        save_state(processed_ids)
 
     return new_for_telegram
 
-# Adicione ao check_legislativo.py
-
-# Arquivo para salvar os projetos que estamos monitorando
+# --- WATCHLIST / TRACKING ---
 TRACKING_FILE = _resolve_data_path("LEG_TRACKING_FILE_PATH", "legislativo_watchlist.json")
 
 def load_watchlist() -> Dict:
@@ -262,21 +253,17 @@ def save_watchlist(data: Dict):
     with open(TRACKING_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
 
-# --- FUNÇÃO PARA ADICIONAR PROJETO AO MONITORAMENTO ---
 def toggle_tracking(item_data: Dict) -> str:
-    """Adiciona ou remove um item da lista de monitoramento."""
     watchlist = load_watchlist()
     uid = item_data.get('uid')
-    
     if uid in watchlist:
         del watchlist[uid]
         save_watchlist(watchlist)
         return "removido"
     else:
-        # Salva apenas o essencial para consultar depois
         watchlist[uid] = {
             "casa": item_data.get('casa'),
-            "id_api": item_data.get('uid').split('_')[1], # Remove o prefixo CAM_ ou SEN_
+            "id_api": item_data.get('uid').split('_')[1],
             "sigla": item_data.get('tipo'),
             "numero": item_data.get('numero'),
             "ano": item_data.get('ano'),
@@ -287,8 +274,12 @@ def toggle_tracking(item_data: Dict) -> str:
         save_watchlist(watchlist)
         return "adicionado"
 
-# --- CONSULTA DE TRAMITAÇÕES (NOVO CORE) ---
-async def check_tramitacoes_watchlist() -> List[Dict]:
+# --- CONSULTA DE TRAMITAÇÕES (CORRIGIDO) ---
+async def check_tramitacoes_watchlist() -> Tuple[List[Dict], Dict]:
+    """
+    Retorna (lista_de_updates, watchlist_atualizada).
+    NÃO SALVA o arquivo aqui. Quem salva é quem chama, após notificar.
+    """
     watchlist = load_watchlist()
     updates = []
     
@@ -304,7 +295,6 @@ async def check_tramitacoes_watchlist() -> List[Dict]:
                     if resp.status_code == 200:
                         dados = resp.json().get('dados', [])
                         if dados:
-                            # Pega a última tramitação
                             last = dados[-1]
                             novo_status = f"{last.get('dataHora', '')[:10]}: {last.get('despacho') or last.get('descricaoTramitacao')}"
 
@@ -315,21 +305,17 @@ async def check_tramitacoes_watchlist() -> List[Dict]:
                     resp = await client.get(url, headers=headers)
                     if resp.status_code == 200:
                         data = resp.json()
-                        # Navegação no JSON complexo do Senado
                         movs = data.get('MovimentacaoMateria', {}).get('Materia', {}).get('Tramitacoes', {}).get('Tramitacao', [])
-                        if isinstance(movs, dict): movs = [movs] # Normaliza se for item único
+                        if isinstance(movs, dict): movs = [movs]
                         
                         if movs:
-                            last = movs[0] # Senado costuma mandar o mais recente primeiro ou ultimo, verificar ordem
-                            # No Senado, geralmente o array vem ordenado. Pegamos o mais recente.
-                            # Mas garantimos ordenação por data se necessário.
+                            last = movs[0]
                             desc = last.get('IdentificacaoTramitacao', {}).get('DescricaoSituacao') or last.get('TextoTramitacao')
                             data_mov = last.get('DataTramitacao', '')
                             novo_status = f"{data_mov}: {desc}"
 
                 # Lógica de Atualização
                 if novo_status and novo_status != info.get('last_status'):
-                    # Houve mudança!
                     info['last_status'] = novo_status
                     updates.append({
                         "uid": uid,
@@ -343,102 +329,55 @@ async def check_tramitacoes_watchlist() -> List[Dict]:
                 print(f"Erro ao verificar {uid}: {e}")
                 continue
     
-    # Salva os novos status no arquivo para não alertar repetido
-    if updates:
-        save_watchlist(watchlist)
-        
-    return updates
-
-
-# Adicione ao final do check_legislativo.py, ou junto das outras funções de check
+    return updates, watchlist
 
 async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict:
-    """Busca uma proposição específica para obter seus metadados e ID."""
-    
     async with httpx.AsyncClient(timeout=15) as client:
-        
-        # --- BUSCA NA CÂMARA ---
         if casa == 'Câmara':
             url = "https://dadosabertos.camara.leg.br/api/v2/proposicoes"
-            params = {
-                "siglaTipo": sigla.strip().upper(),
-                "numero": numero.strip(),
-                "ano": ano.strip(),
-                "ordem": "DESC",
-                "ordenarPor": "id"
-            }
+            params = {"siglaTipo": sigla.strip().upper(), "numero": numero.strip(), "ano": ano.strip(), "ordem": "DESC", "ordenarPor": "id"}
             try:
                 resp = await client.get(url, params=params)
-                if resp.status_code == 200:
-                    dados = resp.json().get('dados', [])
-                    if dados:
-                        # Retorna o primeiro match
-                        item = dados[0]
-                        return {
-                            "uid": f"CAM_{item['id']}",
-                            "casa": "Câmara",
-                            "tipo": item['siglaTipo'],
-                            "numero": str(item['numero']),
-                            "ano": str(item['ano']),
-                            "ementa": item['ementa'],
-                            "link": f"https://www.camara.leg.br/propostas-legislativas/{item['id']}",
-                            "last_status": "Adicionado Manualmente"
-                        }
-            except Exception as e:
-                print(f"Erro busca manual Câmara: {e}")
+                if resp.status_code == 200 and resp.json().get('dados'):
+                    item = resp.json().get('dados')[0]
+                    return {
+                        "uid": f"CAM_{item['id']}", "casa": "Câmara", "tipo": item['siglaTipo'],
+                        "numero": str(item['numero']), "ano": str(item['ano']), "ementa": item['ementa'],
+                        "link": f"https://www.camara.leg.br/propostas-legislativas/{item['id']}", "last_status": "Adicionado Manualmente"
+                    }
+            except: pass
 
-        # --- BUSCA NO SENADO ---
         elif casa == 'Senado':
             url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
-            headers = {"Accept": "application/json"}
-            params = {
-                "sigla": sigla.strip().upper(),
-                "numero": numero.strip(),
-                "ano": ano.strip()
-            }
+            params = {"sigla": sigla.strip().upper(), "numero": numero.strip(), "ano": ano.strip()}
             try:
-                resp = await client.get(url, headers=headers, params=params)
+                resp = await client.get(url, headers={"Accept": "application/json"}, params=params)
                 if resp.status_code == 200:
-                    data = resp.json()
-                    lista = data.get('PesquisaBasicaMateria', {}).get('Materias', {}).get('Materia', [])
+                    lista = resp.json().get('PesquisaBasicaMateria', {}).get('Materias', {}).get('Materia', [])
                     if isinstance(lista, dict): lista = [lista]
-                    
                     if lista:
-                        # Pega o primeiro
                         dados = lista[0].get('DadosBasicosMateria', {})
-                        cod = dados.get('CodigoMateria')
-                        if cod:
-                            return {
-                                "uid": f"SEN_{cod}",
-                                "casa": "Senado",
-                                "tipo": dados.get('SiglaMateria'),
-                                "numero": str(dados.get('NumeroMateria')),
-                                "ano": str(dados.get('AnoMateria')),
-                                "ementa": dados.get('EmentaMateria'),
-                                "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{cod}",
-                                "last_status": "Adicionado Manualmente"
-                            }
-            except Exception as e:
-                print(f"Erro busca manual Senado: {e}")
-
-    return None # Não encontrou
-
-# --- Adicione isto ao final do arquivo check_legislativo.py ---
+                        return {
+                            "uid": f"SEN_{dados.get('CodigoMateria')}", "casa": "Senado", "tipo": dados.get('SiglaMateria'),
+                            "numero": str(dados.get('NumeroMateria')), "ano": str(dados.get('AnoMateria')), "ementa": dados.get('EmentaMateria'),
+                            "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{dados.get('CodigoMateria')}", "last_status": "Adicionado Manualmente"
+                        }
+            except: pass
+    return None
 
 async def rotina_legislativa_completa():
     """
-    Função Wrapper para o Robô:
-    1. Busca novas proposições (Keywords).
-    2. Verifica atualizações na Watchlist (Tramitações).
-    3. Envia Telegram se houver novidades.
+    Rotina Wrapper Corrigida:
+    1. Busca Novas Proposições (Salva estado somente se enviar).
+    2. Verifica Tramitações (Salva estado somente se enviar).
     """
     print(">>> Iniciando Rotina Legislativa Completa...")
     
-    # 1. Verifica Novas Proposições (Já envia Telegram internamente se only_new=True)
+    # 1. Novas Proposições (Lógica de salvamento já está dentro da função corrigida)
     await check_and_process_legislativo(only_new=True, days_back=3)
     
     # 2. Verifica Watchlist (Tramitações)
-    updates = await check_tramitacoes_watchlist()
+    updates, watchlist_updated = await check_tramitacoes_watchlist()
     
     if updates:
         print(f"Encontradas {len(updates)} atualizações na watchlist.")
@@ -450,7 +389,13 @@ async def rotina_legislativa_completa():
             msg.append(f"🔗 [Link]({up['link']})")
             msg.append("")
         
-        # Envia para o Telegram
-        await send_telegram_message("\n".join(msg))
+        # TENTA ENVIAR
+        sent_success = await send_telegram_message("\n".join(msg))
+        
+        if sent_success:
+            save_watchlist(watchlist_updated)
+            print("✅ Watchlist salva após notificação com sucesso.")
+        else:
+            print("❌ Falha no envio (Watchlist). Dados não salvos para retentativa.")
     else:
         print("Nenhuma atualização na watchlist.")
