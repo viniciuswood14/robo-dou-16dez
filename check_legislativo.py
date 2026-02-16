@@ -29,7 +29,7 @@ def _resolve_data_path(env_var: str, default_filename: str) -> str:
         return custom_path
     return os.path.join(BASE_DIR, default_filename)
 
-STATE_FILE_PATH = _resolve_data_path("LEG_STATE_FILE_PATH", "legislativo_state.json")
+STATE_FILE_PATH = _resolve_data_path("LEG_STATE_FILE_PATH", "legislativo_state2.json")
 
 # Lista de palavras-chave estratégicas para a Marinha
 KEYWORDS = [
