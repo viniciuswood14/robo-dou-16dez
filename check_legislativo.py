@@ -16,7 +16,20 @@ except ImportError:
         print(f"[TELEGRAM MOCK] {msg}")
 
 # --- CONFIGURAÇÃO ---
-STATE_FILE_PATH = os.environ.get("LEG_STATE_FILE_PATH", "legislativo_state.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _resolve_data_path(env_var: str, default_filename: str) -> str:
+    """
+    Resolve o caminho dos arquivos de estado com prioridade para variável de ambiente.
+    Sem override, fixa em caminho absoluto ao lado deste módulo para evitar
+    inconsistências quando o processo é iniciado em diretórios diferentes.
+    """
+    custom_path = os.environ.get(env_var)
+    if custom_path:
+        return custom_path
+    return os.path.join(BASE_DIR, default_filename)
+
+STATE_FILE_PATH = _resolve_data_path("LEG_STATE_FILE_PATH", "legislativo_state.json")
 
 # Lista de palavras-chave estratégicas para a Marinha
 KEYWORDS = [
@@ -236,7 +249,7 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
 # Adicione ao check_legislativo.py
 
 # Arquivo para salvar os projetos que estamos monitorando
-TRACKING_FILE = "legislativo_watchlist.json"
+TRACKING_FILE = _resolve_data_path("LEG_TRACKING_FILE_PATH", "legislativo_watchlist.json")
 
 def load_watchlist() -> Dict:
     try:
