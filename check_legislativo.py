@@ -225,9 +225,10 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
     if only_new and new_for_telegram:
         print(f"Enviando {len(new_for_telegram)} novas proposições para o Telegram...")
         msg_header = "🏛️ *Monitoramento Legislativo (Novidades)*"
-        
-        # Envia em blocos para não estourar limite do Telegram
-        buffer_msg = [msg_header]
+
+        # Envia em blocos para não estourar o limite de 4096 caracteres do Telegram.
+        # O corte é feito por item para evitar quebrar links/markdown no meio.
+        msg_chunks = [msg_header]
         for p in new_for_telegram:
             item_txt = (
                 f"\n📍 *{p['casa']}* - {p['tipo']} {p['numero']}/{p['ano']}"
@@ -235,9 +236,15 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
                 f"\n📝 {p['ementa'][:150]}..."
                 f"\n🔗 [Inteiro Teor]({p['link']})"
             )
-            buffer_msg.append(item_txt)
-        
-        await send_telegram_message("\n".join(buffer_msg))
+
+            # Mantém margem para parse do Telegram e evita truncar markdown.
+            if len(msg_chunks[-1]) + len(item_txt) > 3800:
+                msg_chunks.append(msg_header + item_txt)
+            else:
+                msg_chunks[-1] += item_txt
+
+        for chunk in msg_chunks:
+            await send_telegram_message(chunk)
         return new_for_telegram
 
     # Se a chamada veio do SITE (only_new=False), retorna TUDO (novos + velhos)
@@ -442,15 +449,23 @@ async def rotina_legislativa_completa():
     
     if updates:
         print(f"Encontradas {len(updates)} atualizações na watchlist.")
-        msg = ["🏛️ *Atualização de Tramitação (Watchlist)*", ""]
+        msg_header = "🏛️ *Atualização de Tramitação (Watchlist)*"
+        msg_chunks = [msg_header]
         for up in updates:
-            msg.append(f"📌 *{up['titulo']}*")
-            msg.append(f"📝 {up['ementa'][:100]}...")
-            msg.append(f"🔄 Status: {up['status']}")
-            msg.append(f"🔗 [Link]({up['link']})")
-            msg.append("")
-        
-        # Envia para o Telegram
-        await send_telegram_message("\n".join(msg))
+            item_txt = (
+                f"\n\n📌 *{up['titulo']}*"
+                f"\n📝 {up['ementa'][:100]}..."
+                f"\n🔄 Status: {up['status']}"
+                f"\n🔗 [Link]({up['link']})"
+            )
+
+            if len(msg_chunks[-1]) + len(item_txt) > 3800:
+                msg_chunks.append(msg_header + item_txt)
+            else:
+                msg_chunks[-1] += item_txt
+
+        # Envia para o Telegram em blocos seguros
+        for chunk in msg_chunks:
+            await send_telegram_message(chunk)
     else:
         print("Nenhuma atualização na watchlist.")
