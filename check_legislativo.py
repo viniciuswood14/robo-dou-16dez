@@ -8,13 +8,15 @@ import httpx
 from datetime import datetime, timedelta
 from typing import List, Set, Dict, Tuple, Union
 
-# Tenta importar o módulo de telegram
+# Mudei para ver o erro real nos logs do Render
 try:
     from telegram import send_telegram_message
-except ImportError:
+except Exception as e:
+    print(f"❌ ERRO CRÍTICO AO IMPORTAR TELEGRAM: {e}")
+    # Mantemos o mock apenas para o código não travar totalmente, mas agora saberemos o motivo
     async def send_telegram_message(msg):
-        print(f"[TELEGRAM MOCK] {msg}")
-        return True
+        print(f"[TELEGRAM MOCK - IMPORT FALHOU] {msg}")
+        return False
 
 # --- CONFIGURAÇÃO ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
