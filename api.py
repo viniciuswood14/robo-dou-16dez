@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.0 (Integração Total: Drive + Autenticação/Senha)
+# Versão: 21.1 (Fix: Telegram no Force Update)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -13,10 +13,7 @@ from urllib.parse import urljoin
 import asyncio
 import httpx
 from bs4 import BeautifulSoup
-from fastapi.responses import Response # Importante para enviar o PDF binário
 from fastapi.responses import Response
-from urllib.parse import urljoin
-import io
 
 # Carrega o arquivo de configuração globalmente
 try:
@@ -35,6 +32,15 @@ import google.generativeai as genai
 # Google Drive API & Auth
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
+
+# --- NOVO: Importação do Telegram para a API avisar também ---
+try:
+    from telegram import send_telegram_message
+except ImportError:
+    # Mock caso falhe a importação, para não quebrar o site
+    async def send_telegram_message(msg):
+        print(f"[API TELEGRAM MOCK] {msg}")
+        return False
 
 # Tenta importar módulos opcionais (Robôs específicos)
 try:
@@ -62,7 +68,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v21.0 (Secure + Drive)")
+app = FastAPI(title="Robô CORM API - v21.1 (Telegram Fix)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,8 +91,6 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     
     # 1. Lista de arquivos/rotas que NÃO precisam de senha (públicos)
-    # Precisamos liberar CSS, JS, Imagens, JSON e a própria rota de Login
-    # Também liberamos rotas de API puras (opcional, mas bom para webhooks do Telegram se houver)
     public_paths = ["/login", "/auth", "/favicon.ico", "/health"]
     public_extensions = (".css", ".js", ".png", ".jpg", ".jpeg", ".svg", ".json", ".ico")
 
@@ -146,6 +150,7 @@ async def logout():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie("corm_session")
     return response
+
 def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: str) -> Optional[str]:
     """Encontra o link do PDF (ex: DO1.pdf) dentro da listagem do InLabs."""
     soup = BeautifulSoup(html, "html.parser")
@@ -159,6 +164,7 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
             if target in href.upper() or target in a.get_text().upper():
                 return urljoin(base_url_for_rel, href)
     return None
+
 # ==========================================
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
@@ -224,26 +230,15 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             await asyncio.sleep(1)
 
             # --- PASSO C (NUCLEAR): Extração e Injeção Manual de Cookies ---
-            # Pegamos TODOS os cookies que temos agora (do www) e criamos uma string única
             print(">>> [3/4] Construindo Header de Cookie Unificado...")
-            
-            # Pega cookies do Jar
             cookies_dict = {c.name: c.value for c in client.cookies.jar}
-            
-            # Monta string "Cookie: nome=valor; nome2=valor2"
             cookie_header_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
             
-            print(f">>> Cookies capturados: {list(cookies_dict.keys())}")
-            
-            # Define headers ESPECÍFICOS para o download, sobrescrevendo os automáticos
             download_headers = headers_base.copy()
-            download_headers["Cookie"] = cookie_header_str # FORÇA BRUTA: Envia os cookies do www para o inlabs
+            download_headers["Cookie"] = cookie_header_str
             download_headers["Host"] = "inlabs.in.gov.br"
             download_headers["Referer"] = url_leitura
             download_headers["Sec-Fetch-Site"] = "same-site"
-            
-            # Removemos o CookieJar do request específico para ele não sobrescrever nosso header manual
-            # Usamos client.build_request para ter controle total
             
             print(f">>> [4/4] Baixando PDF (Forced Cookies): {url_download}")
             
@@ -281,13 +276,14 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
         except Exception as e:
             print(f"Erro Crítico: {e}")
             return Response(content=f"Erro interno no fluxo: {str(e)}", status_code=500)
+
 # =====================================================================================
 # INICIALIZAÇÃO E CONFIGURAÇÕES
 # =====================================================================================
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v21.0 - Secure + Drive) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.1 - Secure + Drive + Telegram Fix) <<<")
     
     # Validação PAC
     try:
@@ -990,7 +986,8 @@ async def get_ai_analysis(clean_text: str, model: genai.GenerativeModel, prompt_
         print(f"Erro IA: {e}")
         return None
 
-# --- ROTAS DE LEGISLATIVO E PAC (MANTIDAS) ---
+# --- ROTAS DE LEGISLATIVO E PAC (ATUALIZADO COM FIX TELEGRAM) ---
+
 class TrackRequest(BaseModel):
     uid: str
     casa: str
@@ -1012,7 +1009,18 @@ async def get_watchlist():
 
 @app.post("/legislativo/force-update")
 async def force_update_legis():
-    updates = await check_tramitacoes_watchlist()
+    # Chama com commit=True para salvar, mas captura o retorno
+    updates = await check_tramitacoes_watchlist(commit=True)
+    
+    # Se houver novidades, o site AGORA envia o Telegram!
+    if updates:
+        print(f"[API] Updates encontrados: {len(updates)}. Enviando Telegram...")
+        msg = ["🏛️ *Atualização de Tramitação (Manual/Site)*", ""]
+        for up in updates:
+            msg.append(f"📌 *{up['titulo']}*\n📝 {up['ementa'][:100]}...\n🔄 Status: {up['status']}\n🔗 [Link]({up['link']})\n")
+        
+        await send_telegram_message("\n".join(msg))
+    
     return {"updates_found": len(updates), "data": updates}
 
 class ManualSearch(BaseModel):
