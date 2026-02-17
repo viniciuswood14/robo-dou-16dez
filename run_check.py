@@ -1,5 +1,5 @@
 ## Nome do arquivo: run_check.py
-# Versão: 18.0 (Modo Heartbeat + Horário Estendido)
+# Versão: 18.1 (Fix: Debug Legislativo Exposto)
 
 import asyncio
 import json
@@ -60,12 +60,21 @@ try:
 except ImportError:
     print("Aviso: 'dou_fallback.py' não encontrado. Redundância desativada.")
     executar_fallback = None
-# No topo do run_check.py, junto com as outras importações try/except
+
+# --- [IMPORTAÇÃO LEGISLATIVO - COM DEBUG] ---
 try:
+    # Tenta importar e avisa se der certo
     from check_legislativo import rotina_legislativa_completa
-except ImportError:
-    print("Aviso: 'check_legislativo.py' não encontrado ou função nova não definida.")
+    print("✅ Módulo Legislativo (rotina_legislativa_completa) importado com sucesso!")
+except ImportError as e:
+    # Mostra o erro exato nos logs do Render
+    print(f"❌ ERRO CRÍTICO: Falha ao importar 'rotina_legislativa_completa'. Detalhe: {e}")
     rotina_legislativa_completa = None
+except Exception as e:
+    # Captura outros erros (sintaxe, etc)
+    print(f"❌ ERRO DESCONHECIDO ao carregar legislativo: {e}")
+    rotina_legislativa_completa = None
+
 
 # --- CONFIGURAÇÃO DO ESTADO (DOU) ---
 STATE_FILE_PATH = os.environ.get("STATE_FILE_PATH", "/dados/processed_state.json")
@@ -117,8 +126,6 @@ async def check_and_process_dou(today_str: str):
     fallback_marker = f"FALLBACK_DONE_{today_str}"
     if fallback_marker in processed_zips_today:
         print("Modo Fallback já foi executado com sucesso hoje. Pulando.")
-        # Se quiser avisar que pulou pois já fez fallback:
-        # await send_telegram_message(f"ℹ️ DOU {today_str}: Verificação pulada (Fallback já realizado hoje).")
         return
 
     pubs_finais: List[Publicacao] = []
@@ -208,7 +215,6 @@ async def check_and_process_dou(today_str: str):
 
     except Exception as e:
         print(f"⚠️ Erro no InLabs: {e}")
-        # await send_telegram_message(f"⚠️ Erro de conexão InLabs: {str(e)[:200]}")
         usou_fallback = True
         
     finally:
@@ -258,8 +264,6 @@ async def check_and_process_dou(today_str: str):
         return
 
     print(f"Enviando {len(pubs_finais)} matérias para análise da IA...")
-    # Opcional: Avisar que está analisando
-    # await send_telegram_message(f"🧠 Analisando {len(pubs_finais)} matérias com IA...")
     
     pubs_ready = []
     tasks = []
