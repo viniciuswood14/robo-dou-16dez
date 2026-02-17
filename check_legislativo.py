@@ -1,5 +1,5 @@
 # Nome do arquivo: check_legislativo.py
-# Versão: 10.2 (Fix: API Compatibility + Safe Telegram State)
+# Versão: 10.3 (Fix: Debug Import Telegram Exposto)
 
 import os
 import json
@@ -8,12 +8,14 @@ import httpx
 from datetime import datetime, timedelta
 from typing import List, Set, Dict, Tuple, Union
 
-# Mudei para ver o erro real nos logs do Render
+# --- CORREÇÃO DE IMPORTAÇÃO (DEBUG) ---
+# Tenta importar o módulo de telegram e mostra o erro se falhar
 try:
     from telegram import send_telegram_message
+    # Opcional: print("✅ Módulo Telegram importado com sucesso no Legislativo!")
 except Exception as e:
-    print(f"❌ ERRO CRÍTICO AO IMPORTAR TELEGRAM: {e}")
-    # Mantemos o mock apenas para o código não travar totalmente, mas agora saberemos o motivo
+    print(f"❌ ERRO CRÍTICO AO IMPORTAR TELEGRAM NO LEGISLATIVO: {e}")
+    # Mantém o mock apenas para não travar, mas avisando do erro
     async def send_telegram_message(msg):
         print(f"[TELEGRAM MOCK - IMPORT FALHOU] {msg}")
         return False
