@@ -1,5 +1,5 @@
 ## Nome do arquivo: run_check.py
-# Versão: 18.1 (Fix: Debug Legislativo Exposto)
+# Versão: 19.0 (Add: Sincronização Automática Gmail -> GitHub)
 
 import asyncio
 import json
@@ -61,19 +61,24 @@ except ImportError:
     print("Aviso: 'dou_fallback.py' não encontrado. Redundância desativada.")
     executar_fallback = None
 
-# --- [IMPORTAÇÃO LEGISLATIVO - COM DEBUG] ---
+# --- [IMPORTAÇÃO LEGISLATIVO] ---
 try:
-    # Tenta importar e avisa se der certo
     from check_legislativo import rotina_legislativa_completa
     print("✅ Módulo Legislativo (rotina_legislativa_completa) importado com sucesso!")
 except ImportError as e:
-    # Mostra o erro exato nos logs do Render
     print(f"❌ ERRO CRÍTICO: Falha ao importar 'rotina_legislativa_completa'. Detalhe: {e}")
     rotina_legislativa_completa = None
 except Exception as e:
-    # Captura outros erros (sintaxe, etc)
     print(f"❌ ERRO DESCONHECIDO ao carregar legislativo: {e}")
     rotina_legislativa_completa = None
+
+# --- [NOVO: IMPORTAÇÃO SYNC PAC (GMAIL)] ---
+try:
+    from sync_pac import sync_pac_routine
+    print("✅ Módulo Sync PAC (Gmail) importado com sucesso!")
+except ImportError:
+    print("⚠️ Aviso: 'sync_pac.py' não encontrado. Sincronização automática desativada.")
+    sync_pac_routine = None
 
 
 # --- CONFIGURAÇÃO DO ESTADO (DOU) ---
@@ -324,6 +329,7 @@ async def main_loop():
     
     valor_check_done = False
     pac_check_done = False
+    pac_sync_done = False # <--- Flag de controle do Sync Gmail
     
     # Controle de hora para o Legislativo (para não rodar a cada 10 min)
     last_legis_hour = -1 
@@ -342,6 +348,7 @@ async def main_loop():
         if last_day != hoje_str:
             valor_check_done = False
             pac_check_done = False
+            pac_sync_done = False # <--- Reseta a flag do Sync
             last_day = hoje_str
             print(f"*** Novo dia: {hoje_str} ***")
 
@@ -373,7 +380,21 @@ async def main_loop():
                 except Exception as e:
                     print(f"Erro PAC: {e}")
 
-            # 4. LEGISLATIVO (Rodar 1 vez por hora, a partir das 08h)
+            # 4. SYNC PAC GMAIL (06:00+, dias úteis)
+            # Roda depois do PAC check original ou para preparar o dia seguinte
+            # Como atualiza o GitHub, vai triggerar um rebuild do Render
+            if is_weekday and agora.hour == 6 and agora.minute >= 0 and not pac_sync_done:
+                if sync_pac_routine:
+                    print(f"[{agora.strftime('%H:%M')}] 🔄 Rodando Sincronização PAC (Gmail -> Github)...")
+                    try:
+                        # Executa a rotina (síncrona)
+                        sync_pac_routine()
+                        pac_sync_done = True
+                        print("✅ Sync PAC finalizado.")
+                    except Exception as e:
+                        print(f"❌ Erro Sync PAC: {e}")
+
+            # 5. LEGISLATIVO (Rodar 1 vez por hora, a partir das 08h)
             # Verifica se o módulo foi importado e se mudou a hora desde a última checagem
             if rotina_legislativa_completa and agora.hour != last_legis_hour:
                 if agora.hour >= 8: # Evita rodar de madrugada quando não há sessões
