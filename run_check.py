@@ -337,16 +337,7 @@ async def main_loop():
     last_day = None
     
     print("--- Robô Integrado (Safety Mode + Heartbeat) Iniciado ---")
-# --- [BLOCO DE TESTE IMEDIATO] ---
-    # Isso vai forçar o Sync toda vez que você fizer deploy
-    if sync_pac_routine:
-        print("🧪 MODO TESTE: Executando Sync PAC agora...")
-        try:
-            sync_pac_routine()
-            print("✅ Teste Sync finalizado.")
-        except Exception as e:
-            print(f"❌ Erro no Teste Sync: {e}")
-    # ---------------------------------
+
     while True:
         agora = datetime.now(TZ_BRASILIA)
         hoje_str = agora.strftime('%Y-%m-%d')
