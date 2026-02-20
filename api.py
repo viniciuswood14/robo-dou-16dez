@@ -906,7 +906,14 @@ async def processar_inlabs(
                         materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
                         body = article.find("body")
                         if body:
-                            materias[materia_id]["main_article"] = article
+                            # 1. Verifica se esse bloco específico de XML contém a Ementa
+                            xml_str = blob.decode("utf-8", errors="ignore")
+                            has_ementa = "<Ementa" in xml_str or "<ns:Ementa" in xml_str or "Ementa>" in xml_str
+                            
+                            # 2. Só define/sobrescreve o main_article se ele for o primeiro a ser lido, 
+                            # ou se tivermos a certeza de que ele contém a Ementa (ato principal)
+                            if materias[materia_id]["main_article"] is None or has_ementa:
+                                materias[materia_id]["main_article"] = article
                     except: continue
                 
                 for materia_id, content in materias.items():
