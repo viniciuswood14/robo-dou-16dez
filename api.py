@@ -894,26 +894,33 @@ async def processar_inlabs(
                 zb = await download_zip(client, zurl)
                 all_new_xml_blobs = extract_xml_from_zip(zb)
                 materias: Dict[str, Dict[str, Any]] = {}
-                for blob in all_new_xml_blobs:
+              for blob in all_new_xml_blobs:
                     try:
                         soup = BeautifulSoup(blob, "lxml-xml")
                         article = soup.find("article")
                         if not article: continue
-                        materia_id = article.get("idMateria")
-                        if not materia_id: continue
-                        if materia_id not in materias:
-                            materias[materia_id] = {"main_article": None, "full_text": ""}
-                        materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
+                        
+                        materia_id_raw = article.get("idMateria")
+                        if not materia_id_raw: continue
+                        
+                        # NOVO: Remove o sufixo "-1", "-2" ou "_1" para agrupar Ato e Anexos juntos
+                        base_id = re.sub(r"[-_]\d+$", "", materia_id_raw)
+                        
+                        if base_id not in materias:
+                            materias[base_id] = {"main_article": None, "full_text": ""}
+                            
+                        # Junta o texto de todos os anexos no mesmo full_text (para bater nas keywords)
+                        xml_str = blob.decode("utf-8", errors="ignore")
+                        materias[base_id]["full_text"] += (xml_str + "\n")
+                        
                         body = article.find("body")
                         if body:
-                            # 1. Verifica se esse bloco específico de XML contém a Ementa
-                            xml_str = blob.decode("utf-8", errors="ignore")
+                            # Verifica se ESTE xml específico possui a Ementa
                             has_ementa = "<Ementa" in xml_str or "<ns:Ementa" in xml_str or "Ementa>" in xml_str
                             
-                            # 2. Só define/sobrescreve o main_article se ele for o primeiro a ser lido, 
-                            # ou se tivermos a certeza de que ele contém a Ementa (ato principal)
-                            if materias[materia_id]["main_article"] is None or has_ementa:
-                                materias[materia_id]["main_article"] = article
+                            # Só salva como main_article se estiver vazio ou se este for o arquivo da Ementa
+                            if materias[base_id]["main_article"] is None or has_ementa:
+                                materias[base_id]["main_article"] = article
                     except: continue
                 
                 for materia_id, content in materias.items():
