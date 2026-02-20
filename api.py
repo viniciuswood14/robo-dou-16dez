@@ -686,13 +686,22 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
                 is_relevant = True
                 reason = "Ato orçamentário geral."
 
-    elif "DO2" in section:
-        try: soup_copy = BeautifulSoup(full_text_content, "lxml-xml")
-        except: soup_copy = BeautifulSoup(full_text_content, "html.parser")
-        for tag in soup_copy.find_all("p", class_=["assina", "cargo"]):
+elif "DO2" in section:
+        # Cria um objeto BeautifulSoup apenas para limpeza da Seção 2
+        try: 
+            soup_copy = BeautifulSoup(full_text_content, "lxml-xml")
+        except: 
+            soup_copy = BeautifulSoup(full_text_content, "html.parser")
+        
+        # REMOVE AS ASSINATURAS E CARGOS ANTES DA VERIFICAÇÃO
+        # Isso evita que o robô dispare se o nome/tag estiver no rodapé do ato
+        for tag in soup_copy.find_all(["p", "div"], class_=["assina", "cargo", "identifica-signatario"]):
             tag.decompose()
+        
+        # Obtém o texto limpo (sem as assinaturas)
         clean_search_content_lower = norm(soup_copy.get_text(strip=True)).lower()
         
+        # Agora a verificação é feita apenas no que restou do texto
         for term in TERMS_AND_ACRONYMS_S2:
             if term.lower() in clean_search_content_lower:
                 is_relevant = True
