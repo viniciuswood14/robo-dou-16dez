@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.1 (Fix: Telegram no Force Update)
+# Versão: 21.2 (Fix: Ementa Score + Telegram)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -68,7 +68,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v21.1 (Telegram Fix)")
+app = FastAPI(title="Robô CORM API - v21.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -283,7 +283,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v21.1 - Secure + Drive + Telegram Fix) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.2 - Secure + Drive + Telegram + Ementa Score Fix) <<<")
     
     # Validação PAC
     try:
@@ -852,16 +852,15 @@ async def download_zip(client: httpx.AsyncClient, url: str) -> bytes:
     if r.status_code >= 400: raise HTTPException(502, f"Falha ao baixar ZIP {url}")
     return r.content
 
-def extract_xml_from_zip(zip_bytes: bytes) -> List[Tuple[str, bytes]]:
-    xml_files = []
+def extract_xml_from_zip(zip_bytes: bytes) -> List[bytes]:
+    xml_blobs: List[bytes] = []
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
             for name in z.namelist():
                 if name.lower().endswith(".xml"):
-                    # Agora salva o nome original e o conteúdo
-                    xml_files.append((name, z.read(name)))
+                    xml_blobs.append(z.read(name))
     except zipfile.BadZipFile: pass
-    return xml_files
+    return xml_blobs
 
 @app.post("/processar-inlabs", response_model=ProcessResponse)
 async def processar_inlabs(
@@ -880,7 +879,7 @@ async def processar_inlabs(
     pubs_final: List[Publicacao] = []
     usou_fallback = False
     
-    print(f">>> Tentando InLabs (v21.0) para {data}...")
+    print(f">>> Tentando InLabs (v21.2) para {data}...")
     try:
         client = await inlabs_login_and_get_session()
         try:
@@ -893,43 +892,42 @@ async def processar_inlabs(
             for zurl in zip_links:
                 print(f"Baixando {zurl}...")
                 zb = await download_zip(client, zurl)
-               all_new_xml_files = extract_xml_from_zip(zb)
+                all_new_xml_blobs = extract_xml_from_zip(zb)
                 materias: Dict[str, Dict[str, Any]] = {}
                 
-                for filename, blob in all_new_xml_files:
+                for blob in all_new_xml_blobs:
                     try:
                         soup = BeautifulSoup(blob, "lxml-xml")
                         article = soup.find("article")
                         if not article: continue
                         
-                        # 1. Agrupa pelo NOME DO ARQUIVO no ZIP (ex: "12345-1.xml" -> "12345")
-                        filename_only = filename.split("/")[-1]
-                        m_name = re.search(r"(\d+)(?:-\d+)?\.xml$", filename_only, re.I)
+                        materia_id = article.get("idMateria")
+                        if not materia_id: continue
                         
-                        if m_name:
-                            base_id = m_name.group(1)
-                        else:
-                            raw_id = article.get("idMateria") or ""
-                            base_id = re.sub(r"[-_]\d+$", "", raw_id)
+                        # O dicionário agora guarda um 'score' para saber qual arquivo tem a maior Ementa
+                        if materia_id not in materias:
+                            materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
                             
-                        if not base_id: continue
-
-                        if base_id not in materias:
-                            materias[base_id] = {"main_article": None, "full_text": ""}
-                            
-                        # 2. Concatena o texto de TODOS os anexos para a IA e busca de Palavras-Chave
-                        xml_str = blob.decode("utf-8", errors="ignore")
-                        materias[base_id]["full_text"] += (xml_str + "\n")
+                        # Junta o texto de todos os anexos para bater nas keywords (52131, 52000, etc)
+                        materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
                         
                         body = article.find("body")
                         if body:
-                            # 3. Garante que o main_article seja SEMPRE o arquivo principal com a Ementa
-                            is_main_file = bool(re.search(r"^\d+\.xml$", filename_only, re.I))
-                            has_ementa = "<Ementa" in xml_str or "<ns:Ementa" in xml_str or "Ementa>" in xml_str
+                            # Lê as tags REAIS usando o BeautifulSoup
+                            ementa_tag = article.find("Ementa")
+                            identifica_tag = article.find("Identifica")
                             
-                            # Se for o arquivo principal (12345.xml) ou tiver a Ementa, ele assume o controle!
-                            if materias[base_id]["main_article"] is None or is_main_file or has_ementa:
-                                materias[base_id]["main_article"] = article
+                            # Pega apenas o texto puro (ignorando tags e CDATA)
+                            ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
+                            identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
+                            
+                            # Soma a quantidade de letras úteis
+                            score = len(ementa_text) + len(identifica_text)
+                            
+                            # Se este arquivo tiver um texto de Ementa MAIOR que o anterior, ele assume como principal!
+                            if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
+                                materias[materia_id]["main_article"] = article
+                                materias[materia_id]["score"] = score
                     except: continue
                 
                 for materia_id, content in materias.items():
