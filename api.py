@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.2 (Fix: Ementa Score + Telegram + Secao 2 Isolada)
+# Versão: 21.3 (Fix: Correção de Aspas e Limpeza)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -68,7 +68,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v21.2")
+app = FastAPI(title="Robô CORM API - v21.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,20 +117,7 @@ async def login_page():
     if os.path.exists("static/login.html"):
         return FileResponse("static/login.html")
     # Fallback simples caso o arquivo não exista
-    return """
-    <html>
-        <body style="font-family: sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f2f5;">
-            <div style="background:white; padding:2rem; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); text-align:center;">
-                <h2>Acesso Restrito</h2>
-                <form action="/login" method="post">
-                    <input type="password" name="senha" placeholder="Senha do Sistema" style="padding:10px; margin-bottom:10px; width:100%; box-sizing:border-box;" required/>
-                    <br/>
-                    <input type="submit" value="Entrar" style="padding:10px 20px; background:#002c5f; color:white; border:none; border-radius:4px; cursor:pointer;"/>
-                </form>
-            </div>
-        </body>
-    </html>
-    """
+    return "<html><body style='font-family: sans-serif; display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f2f5;'><div style='background:white; padding:2rem; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.1); text-align:center;'><h2>Acesso Restrito</h2><form action='/login' method='post'><input type='password' name='senha' placeholder='Senha do Sistema' style='padding:10px; margin-bottom:10px; width:100%; box-sizing:border-box;' required/><br/><input type='submit' value='Entrar' style='padding:10px 20px; background:#002c5f; color:white; border:none; border-radius:4px; cursor:pointer;'/></form></div></body></html>"
 
 @app.post("/login")
 async def login_submit(senha: str = Form(...)):
@@ -152,7 +139,7 @@ async def logout():
     return response
 
 def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: str) -> Optional[str]:
-    """Encontra o link do PDF (ex: DO1.pdf) dentro da listagem do InLabs."""
+    # Encontra o link do PDF (ex: DO1.pdf) dentro da listagem do InLabs.
     soup = BeautifulSoup(html, "html.parser")
     target = section_key.upper() # ex: "DO1"
     
@@ -283,7 +270,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v21.2 - Secure + Drive + Telegram + Ementa Score Fix) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.3 - Secure + Drive + Telegram + Fix) <<<")
     
     # Validação PAC
     try:
@@ -399,6 +386,7 @@ Recebe Fonte [X] / Cancela Fonte [Y]: R$ [Valor]
 - **Gatilho:** Qualquer portaria do MPO ou MF sobre orçamento que **NÃO** contenha as UOs da Marinha ou Defesa citadas acima.
 - **Formato de Saída:**
 ⚓ MB: Para conhecimento. Sem impacto para a Marinha.
+"""
 
 GEMINI_PESSOAL_PROMPT = """
 Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
@@ -416,11 +404,7 @@ GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre i
 SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
 
 def get_drive_service():
-    """
-    Tenta autenticar no Google Drive usando:
-    1. Variável de Ambiente com o CONTEÚDO do JSON (Mais seguro para Render/Cloud)
-    2. Arquivo físico 'service_account.json' (Para teste local)
-    """
+    # Tenta autenticar no Google Drive usando Variável de Ambiente ou JSON local.
     creds = None
     
     # 1. Tenta ler da Variável de Ambiente (String JSON)
@@ -738,10 +722,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
 
 @app.post("/chat-drive")
 async def chat_drive(pergunta: str = Form(...)):
-    """
-    Busca no Google Drive configurado (via JSON na Env Var)
-    e responde usando o Gemini.
-    """
+    # Endpoint de comunicação com o Google Drive
     if not GEMINI_API_KEY:
         raise HTTPException(500, "GEMINI_API_KEY não configurada.")
     
@@ -780,16 +761,16 @@ async def chat_drive(pergunta: str = Form(...)):
             contexto_drive += f"- Arquivo: {f['name']} (Data: {dt_iso}) - Link: {f['webViewLink']}\n"
 
         final_prompt = f"""
-        Você é o assistente virtual da Marinha (CORM).
-        O usuário perguntou: "{pergunta}"
-        
-        Eu busquei no Drive e encontrei estes arquivos (do mais recente para o antigo):
-        {contexto_drive}
-        
-        Com base APENAS nisso, responda à pergunta do usuário. 
-        Se ele pediu o "último" ou "mais recente", considere a data de modificação.
-        Forneça o nome do arquivo e o link se possível.
-        """
+Você é o assistente virtual da Marinha (CORM).
+O usuário perguntou: "{pergunta}"
+
+Eu busquei no Drive e encontrei estes arquivos (do mais recente para o antigo):
+{contexto_drive}
+
+Com base APENAS nisso, responda à pergunta do usuário. 
+Se ele pediu o "último" ou "mais recente", considere a data de modificação.
+Forneça o nome do arquivo e o link se possível.
+"""
         
         response = await model.generate_content_async(final_prompt)
         return {"resposta": response.text}
@@ -888,7 +869,7 @@ async def processar_inlabs(
     pubs_final: List[Publicacao] = []
     usou_fallback = False
     
-    print(f">>> Tentando InLabs (v21.2) para {data}...")
+    print(f">>> Tentando InLabs (v21.3) para {data}...")
     try:
         client = await inlabs_login_and_get_session()
         try:
