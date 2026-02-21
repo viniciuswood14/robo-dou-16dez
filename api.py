@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.3 (Fix: Correção de Aspas e Limpeza)
+# Versão: 21.4 (Exclusividade InLabs com Auto-Retry)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -59,16 +59,11 @@ try:
 except ImportError:
     pass
 
-try:
-    from dou_fallback import executar_fallback
-except ImportError:
-    executar_fallback = None
-
 # =====================================================================================
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v21.3")
+app = FastAPI(title="Robô CORM API - v21.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -270,7 +265,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v21.3 - Secure + Drive + Telegram + Fix) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.4 - Secure + Drive + Telegram + InLabs Exclusivo) <<<")
     
     # Validação PAC
     try:
@@ -347,23 +342,24 @@ Busque impactos financeiros DIREtos (valores em R$) para:
 Selecione APENAS UM dos formatos abaixo e imprima SOMENTE ELE (sem adicionar mais nenhuma palavra):
 
 Se for Crédito Suplementar COM Impacto MB/MD (cite os valores da Marinha):
-MB:
+⚓ MB:
 ✅Suplementações (Total) – R$ [Valor]
 [Ação]: R$ [Valor]
 ✅Cancelamentos (Total) – R$ [Valor]
 [Ação]: R$ [Valor]
 
 Se for Movimentação e Empenho COM Impacto MB/MD (Limites):
-MD:
+⚓ MD:
 ✅Ampliação do Limite de Movimentação e Empenho:
 RP2: R$ [Valor] / RP3: R$ [Valor]
 
 Se for GND ou Fonte COM Impacto MB/MD:
-Alteração [GND ou Fonte]: [Descrição] - R$ [Valor]
+⚓ Alteração [GND ou Fonte]: [Descrição] - R$ [Valor]
 
 Se o ato NÃO citar as UOs acima ou tratar apenas de diretrizes transversais genéricas (mesmo sendo do MGI/MPO/MF):
-MB: Para conhecimento. Sem impacto para a Marinha. [Apenas se o ato trouxer alguma regra administrativa transversal, adicione 1 frase curta colada resumindo. Ex: "A portaria trata de regras sobre consignações em folha de pagamento". Se for apenas crédito/orçamento para outros ministérios da saúde/educação, feche o texto na palavra "Marinha." sem resumir].
+⚓ MB: Para conhecimento. Sem impacto para a Marinha. [Apenas se o ato trouxer alguma regra administrativa transversal, adicione 1 frase curta colada resumindo. Ex: "A portaria trata de regras sobre consignações em folha de pagamento". Se for apenas crédito/orçamento para outros ministérios da saúde/educação, feche o texto na palavra "Marinha." sem resumir].
 """
+
 GEMINI_PESSOAL_PROMPT = """
 Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
 Sua única missão é: ler a publicação e resumir em UMA frase curta (máximo 2 linhas) o que aconteceu EXCLUSIVAMENTE com o nosso "Alvo Identificado" (ex: para qual cargo, missão, tarefa ou ato ele foi designado/afetado).
@@ -526,7 +522,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     
     # Filtros de Órgão
     organ_lower = organ.lower()
-    is_central_budget_organ = any(x in organ_lower for x in ["planejamento", "orçamento", "fazenda", "gestão", "economia", "presidência"])
+    is_central_budget_organ = any(x in organ_lower for x in ["planejamento", "orçamento", "fazenda", "gestão", "economia", "presidência", "casa civil"])
     
     if not is_central_budget_organ:
         if "comando da aeronáutica" in organ_lower or "comando do exército" in organ_lower:
@@ -653,7 +649,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
         if not is_relevant and is_central_budget_organ:
             if any(bkw in search_content_lower for bkw in BUDGET_KEYWORDS_S1):
                 is_relevant = True
-                is_mpo_navy_hit_flag = True # <-- IMUNIDADE TOTAL ADICIONADA AQUI
+                is_mpo_navy_hit_flag = True # IMUNIDADE PARA MPO/MF GARANTIDA
                 reason = "Ato orçamentário geral."
 
     elif "DO2" in section:
@@ -737,17 +733,7 @@ async def chat_drive(pergunta: str = Form(...)):
             dt_iso = f.get('modifiedTime', '')
             contexto_drive += f"- Arquivo: {f['name']} (Data: {dt_iso}) - Link: {f['webViewLink']}\n"
 
-        final_prompt = f"""
-Você é o assistente virtual da Marinha (CORM).
-O usuário perguntou: "{pergunta}"
-
-Eu busquei no Drive e encontrei estes arquivos (do mais recente para o antigo):
-{contexto_drive}
-
-Com base APENAS nisso, responda à pergunta do usuário. 
-Se ele pediu o "último" ou "mais recente", considere a data de modificação.
-Forneça o nome do arquivo e o link se possível.
-"""
+        final_prompt = f"Você é o assistente virtual da Marinha (CORM).\nO usuário perguntou: '{pergunta}'\n\nEu busquei no Drive e encontrei estes arquivos (do mais recente para o antigo):\n{contexto_drive}\n\nCom base APENAS nisso, responda à pergunta do usuário.\nSe ele pediu o 'último' ou 'mais recente', considere a data de modificação.\nForneça o nome do arquivo e o link se possível."
         
         response = await model.generate_content_async(final_prompt)
         return {"resposta": response.text}
@@ -844,81 +830,81 @@ async def processar_inlabs(
         except: pass
 
     pubs_final: List[Publicacao] = []
-    usou_fallback = False
     
-    print(f">>> Tentando InLabs (v21.3) para {data}...")
-    try:
-        client = await inlabs_login_and_get_session()
+    print(f">>> Tentando InLabs (v21.4) com Retry para {data}...")
+    MAX_RETRIES = 3
+    sucesso_inlabs = False
+    last_error = None
+    
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            listing_url = await resolve_date_url(client, data)
-            html = await fetch_listing_html(client, data)
-            zip_links = pick_zip_links_from_listing(html, listing_url, secs)
+            client = await inlabs_login_and_get_session()
+            try:
+                listing_url = await resolve_date_url(client, data)
+                html = await fetch_listing_html(client, data)
+                zip_links = pick_zip_links_from_listing(html, listing_url, secs)
+                
+                if not zip_links: 
+                    raise HTTPException(404, detail="ZIPs não encontrados.")
+
+                for zurl in zip_links:
+                    print(f"Baixando {zurl}...")
+                    zb = await download_zip(client, zurl)
+                    all_new_xml_blobs = extract_xml_from_zip(zb)
+                    materias: Dict[str, Dict[str, Any]] = {}
+                    
+                    for blob in all_new_xml_blobs:
+                        try:
+                            soup = BeautifulSoup(blob, "lxml-xml")
+                            article = soup.find("article")
+                            if not article: continue
+                            
+                            materia_id = article.get("idMateria")
+                            if not materia_id: continue
+                            
+                            if materia_id not in materias:
+                                materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
+                                
+                            materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
+                            
+                            body = article.find("body")
+                            if body:
+                                ementa_tag = article.find("Ementa")
+                                identifica_tag = article.find("Identifica")
+                                
+                                ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
+                                identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
+                                
+                                score = len(ementa_text) + len(identifica_text)
+                                
+                                if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
+                                    materias[materia_id]["main_article"] = article
+                                    materias[materia_id]["score"] = score
+                        except: continue
+                    
+                    for materia_id, content in materias.items():
+                        if content["main_article"]:
+                            publication = process_grouped_materia(content["main_article"], content["full_text"], custom_keywords)
+                            if publication:
+                                pubs_final.append(publication)
+                                
+                sucesso_inlabs = True
+                break # Sai do loop de Retry
+            finally:
+                await client.aclose()
+        except HTTPException as he:
+            last_error = he
+            print(f"⚠️ InLabs HTTP {he.status_code} na tentativa {attempt}.")
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ Falha no InLabs tentativa {attempt}: {e}")
             
-            if not zip_links: raise HTTPException(404, detail="ZIPs não encontrados.")
+        if not sucesso_inlabs and attempt < MAX_RETRIES:
+            print("Aguardando 5 segundos antes de tentar novamente...")
+            await asyncio.sleep(5)
 
-            for zurl in zip_links:
-                print(f"Baixando {zurl}...")
-                zb = await download_zip(client, zurl)
-                all_new_xml_blobs = extract_xml_from_zip(zb)
-                materias: Dict[str, Dict[str, Any]] = {}
-                
-                for blob in all_new_xml_blobs:
-                    try:
-                        soup = BeautifulSoup(blob, "lxml-xml")
-                        article = soup.find("article")
-                        if not article: continue
-                        
-                        materia_id = article.get("idMateria")
-                        if not materia_id: continue
-                        
-                        # O dicionário agora guarda um 'score' para saber qual arquivo tem a maior Ementa
-                        if materia_id not in materias:
-                            materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
-                            
-                        # Junta o texto de todos os anexos para bater nas keywords (52131, 52000, etc)
-                        materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
-                        
-                        body = article.find("body")
-                        if body:
-                            # Lê as tags REAIS usando o BeautifulSoup
-                            ementa_tag = article.find("Ementa")
-                            identifica_tag = article.find("Identifica")
-                            
-                            # Pega apenas o texto puro (ignorando tags e CDATA)
-                            ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
-                            identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
-                            
-                            # Soma a quantidade de letras úteis
-                            score = len(ementa_text) + len(identifica_text)
-                            
-                            # Se este arquivo tiver um texto de Ementa MAIOR que o anterior, ele assume como principal!
-                            if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
-                                materias[materia_id]["main_article"] = article
-                                materias[materia_id]["score"] = score
-                    except: continue
-                
-                for materia_id, content in materias.items():
-                    if content["main_article"]:
-                        publication = process_grouped_materia(content["main_article"], content["full_text"], custom_keywords)
-                        if publication:
-                            pubs_final.append(publication)
-        finally:
-            await client.aclose()
-
-    except Exception as e:
-        print(f"⚠️ Falha no InLabs: {e}")
-        usou_fallback = True
-
-    if usou_fallback and executar_fallback:
-        try:
-            fb_results = await executar_fallback(data, custom_keywords)
-            for item in fb_results:
-                pubs_final.append(Publicacao(
-                    organ=item['organ'], type=item['type'], summary=item['summary'],
-                    raw=item['raw'], relevance_reason=item['relevance_reason'] + " (Fallback)",
-                    section=item['section'], clean_text=item['raw'], is_parsed_mpo=False
-                ))
-        except Exception: pass
+    if not sucesso_inlabs:
+        raise HTTPException(500, detail=f"Falha total no InLabs após {MAX_RETRIES} tentativas. Último erro: {last_error}")
 
     seen: Set[str] = set()
     merged: List[Publicacao] = []
@@ -948,7 +934,6 @@ async def processar_dou_ia(
     for p in res_padrao.publications:
         # Se for Seção 2, usa o prompt exclusivo de pessoal e injeta o alvo
         if p.section and ("DO2" in p.section or "Seção 2" in p.section):
-            # Extrai do sistema QUEM fez a matéria ser capturada
             alvo_identificado = p.relevance_reason or "Militar/Servidor de interesse"
             prompt = GEMINI_PESSOAL_PROMPT + f"\n\n[ALVO IDENTIFICADO PELO SISTEMA: {alvo_identificado}]\nDescreva apenas a ação referente a este alvo."
         # Se for Seção 1/Outros, mantém a lógica original
@@ -969,7 +954,6 @@ async def analyze_single_pub(pub: Publicacao, model, prompt_template):
     try:
         analysis = await get_ai_analysis(pub.clean_text or pub.raw, model, prompt_template)
         if analysis:
-            # Verifica se é uma publicação da Seção 2
             is_secao_2 = pub.section and ("DO2" in pub.section or "Seção 2" in pub.section)
             
             # Só descarta se disser "sem impacto" E NÃO for MPO E NÃO for Seção 2
@@ -1012,18 +996,13 @@ async def get_watchlist():
 
 @app.post("/legislativo/force-update")
 async def force_update_legis():
-    # Chama com commit=True para salvar, mas captura o retorno
     updates = await check_tramitacoes_watchlist(commit=True)
-    
-    # Se houver novidades, o site AGORA envia o Telegram!
     if updates:
         print(f"[API] Updates encontrados: {len(updates)}. Enviando Telegram...")
         msg = ["🏛️ *Atualização de Tramitação (Manual/Site)*", ""]
         for up in updates:
             msg.append(f"📌 *{up['titulo']}*\n📝 {up['ementa'][:100]}...\n🔄 Status: {up['status']}\n🔗 [Link]({up['link']})\n")
-        
         await send_telegram_message("\n".join(msg))
-    
     return {"updates_found": len(updates), "data": updates}
 
 class ManualSearch(BaseModel):
@@ -1046,21 +1025,6 @@ async def processar_valor_ia(data: str = Form(...)):
     pubs_list, _ = await run_valor_analysis(data, use_state=False)
     pubs_model = [ValorPublicacao(**p) for p in pubs_list]
     return ProcessResponseValor(date=data, count=len(pubs_model), publications=pubs_model, whatsapp_text=monta_valor_whatsapp(pubs_model, data))
-
-@app.post("/teste-fallback", response_model=ProcessResponse)
-async def teste_fallback(data: str = Form(...), keywords_json: Optional[str] = Form(None)):
-    if not executar_fallback: raise HTTPException(500, detail="Módulo 'dou_fallback.py' não encontrado.")
-    custom_keywords = []
-    if keywords_json:
-        try:
-            kl = json.loads(keywords_json)
-            if isinstance(kl, list): custom_keywords = [str(k).strip().lower() for k in kl if str(k).strip()]
-        except: pass
-    try:
-        fb_results = await executar_fallback(data, custom_keywords)
-    except Exception as e: raise HTTPException(500, detail=str(e))
-    pubs = [Publicacao(organ=i['organ'], type=i['type'], summary=i['summary'], raw=i['raw'], relevance_reason=i['relevance_reason'], section=i['section'], clean_text=i['raw']) for i in fb_results]
-    return ProcessResponse(date=data, count=len(pubs), publications=pubs, whatsapp_text=monta_whatsapp(pubs, data))
 
 async def crawl_valor_headlines(cover_url: str, date_str: str) -> List[Dict[str, str]]:
     print(f"[Valor Crawler] Acessando capa: {cover_url}")
