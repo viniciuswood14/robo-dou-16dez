@@ -120,7 +120,7 @@ async def check_and_process_dou(today_str: str):
         return
     genai.configure(api_key=GEMINI_API_KEY)
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-pro-preview")
     except Exception as e:
         print(f"Falha IA: {e}")
         return
