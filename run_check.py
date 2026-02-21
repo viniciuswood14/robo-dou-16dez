@@ -410,7 +410,7 @@ async def main_loop():
             # 4. SYNC PAC GMAIL (06:00+, dias úteis)
             # Roda depois do PAC check original ou para preparar o dia seguinte
             # Como atualiza o GitHub, vai triggerar um rebuild do Render
-            if is_weekday and agora.hour == 6 and agora.minute >= 0 and not pac_sync_done:
+            if is_weekday and agora.hour == 7 and agora.minute >= 0 and not pac_sync_done:
                 if sync_pac_routine:
                     print(f"[{agora.strftime('%H:%M')}] 🔄 Rodando Sincronização PAC (Gmail -> Github)...")
                     try:
