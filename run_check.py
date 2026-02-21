@@ -351,15 +351,15 @@ async def main_loop():
                 except Exception as e:
                     print(f"Erro Valor: {e}")
 
-            # 3. PAC (05:15+, dias úteis)
-            if is_weekday and agora.hour == 5 and agora.minute >= 15 and not pac_check_done:
-                try:
-                    await check_and_process_pac(ano_str)
-                    pac_check_done = True
-                except Exception as e:
-                    print(f"Erro PAC: {e}")
+            # 3. PAC (05:15+, dias úteis) - DESATIVADO PARA NÃO ENVIAR NOTIFICAÇÃO
+            # if is_weekday and agora.hour == 5 and agora.minute >= 15 and not pac_check_done:
+            #     try:
+            #         await check_and_process_pac(ano_str)
+            #         pac_check_done = True
+            #     except Exception as e:
+            #         print(f"Erro PAC: {e}")
 
-            # 4. SYNC PAC GMAIL (06:00+, dias úteis)
+            # 4. SYNC PAC GMAIL (07:00+, dias úteis)
             if is_weekday and agora.hour == 6 and agora.minute >= 0 and not pac_sync_done:
                 if sync_pac_routine:
                     print(f"[{agora.strftime('%H:%M')}] 🔄 Rodando Sincronização PAC (Gmail -> Github)...")
