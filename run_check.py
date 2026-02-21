@@ -1,5 +1,5 @@
 ## Nome do arquivo: run_check.py
-# Versão: 19.0 (Add: Sincronização Automática Gmail -> GitHub)
+# Versão: 19.1 (Add: Sincronização Automática Gmail -> GitHub + Fix Seção 2 e Ementa Score)
 
 import asyncio
 import json
@@ -28,6 +28,7 @@ try:
         GEMINI_API_KEY,
         GEMINI_MASTER_PROMPT,
         GEMINI_MPO_PROMPT,
+        GEMINI_PESSOAL_PROMPT, # <- ADICIONADO NOVO PROMPT DE PESSOAL
         Publicacao
     )
 except ImportError as e:
@@ -180,21 +181,40 @@ async def check_and_process_dou(today_str: str):
             save_state(state)
             return
 
-        # Agrupa e Filtra (Lógica Genérica de Keywords)
+        # Agrupa e Filtra (Lógica com Ementa Score - Idêntica ao api.py)
         materias = {}
         for blob in all_new_xml_blobs:
             try:
                 soup = BeautifulSoup(blob, "lxml-xml")
                 article = soup.find("article")
                 if not article: continue
+                
                 materia_id = article.get("idMateria")
                 if not materia_id: continue
+                
+                # O dicionário agora guarda um 'score' para saber qual arquivo tem a maior Ementa
                 if materia_id not in materias:
-                    materias[materia_id] = {"main_article": None, "full_text": ""}
+                    materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
+                    
                 materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
+                
                 body = article.find("body")
-                if body and body.find("Identifica"):
-                    materias[materia_id]["main_article"] = article
+                if body:
+                    # Lê as tags REAIS usando o BeautifulSoup
+                    ementa_tag = article.find("Ementa")
+                    identifica_tag = article.find("Identifica")
+                    
+                    # Pega apenas o texto puro (ignorando tags e CDATA)
+                    ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
+                    identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
+                    
+                    # Soma a quantidade de letras úteis
+                    score = len(ementa_text) + len(identifica_text)
+                    
+                    # Se este arquivo tiver um texto de Ementa MAIOR que o anterior, ele assume como principal!
+                    if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
+                        materias[materia_id]["main_article"] = article
+                        materias[materia_id]["score"] = score
             except: continue
         
         for materia_id, content in materias.items():
@@ -274,9 +294,14 @@ async def check_and_process_dou(today_str: str):
     tasks = []
 
     for p in pubs_finais:
-        prompt_to_use = GEMINI_MASTER_PROMPT
-        if p.is_mpo_navy_hit:
+        # Mesma lógica do api.py: Identifica Seção 2 e injeta o alvo
+        if p.section and ("DO2" in p.section or "Seção 2" in p.section):
+            alvo_identificado = p.relevance_reason or "Militar/Servidor de interesse"
+            prompt_to_use = GEMINI_PESSOAL_PROMPT + f"\n\n[ALVO IDENTIFICADO PELO SISTEMA: {alvo_identificado}]\nDescreva apenas a ação referente a este alvo."
+        elif p.is_mpo_navy_hit:
             prompt_to_use = GEMINI_MPO_PROMPT
+        else:
+            prompt_to_use = GEMINI_MASTER_PROMPT
         
         texto_analise = p.clean_text if p.clean_text else p.raw
         tasks.append(get_ai_analysis(texto_analise, model, prompt_to_use))
@@ -289,8 +314,10 @@ async def check_and_process_dou(today_str: str):
             pubs_ready.append(p)
             continue
         
-        # Filtro de relevância da IA
-        if "sem impacto direto" in ai_out.lower() and not p.is_mpo_navy_hit:
+        is_secao_2 = p.section and ("DO2" in p.section or "Seção 2" in p.section)
+        
+        # Filtro de relevância da IA (Agora BLINDADO para a Seção 2)
+        if "sem impacto" in ai_out.lower() and not p.is_mpo_navy_hit and not is_secao_2:
             continue
             
         p.relevance_reason = ai_out
