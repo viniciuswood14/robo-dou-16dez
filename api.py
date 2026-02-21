@@ -421,9 +421,12 @@ Abre crédito para o Ministério da Saúde.
 
 GEMINI_PESSOAL_PROMPT = """
 Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
-Sua única missão é: identificar as pessoas de interesse mencionadas no texto e resumir em UMA frase curta (máximo 2 linhas) para qual cargo, missão, tarefa ou ato elas foram designadas/afetadas (ex: nomeação, exoneração, viagem, pensão).
-Exemplo de saída: "O [Posto] [NOME] foi designado(a) para [Ação/Tarefa]." ou "[NOME] teve seu afastamento autorizado para [Local/Evento]."
-NUNCA responda "Sem impacto". Toda publicação enviada para você neste contexto é relevante e a ação da pessoa deve ser descrita.
+Sua única missão é: ler a publicação e resumir em UMA frase curta (máximo 2 linhas) o que aconteceu EXCLUSIVAMENTE com o nosso "Alvo Identificado" (ex: para qual cargo, missão, tarefa ou ato ele foi designado/afetado).
+
+REGRA DE OURO: IGNORE completamente outras pessoas, autoridades, civis ou militares de outras forças (como o Exército) que possam aparecer na mesma portaria. Se o nome não for o nosso alvo, não o mencione na sua resposta.
+
+Exemplo de saída: "O [Posto] [NOME DO ALVO] foi designado(a) para [Ação/Tarefa]."
+NUNCA responda "Sem impacto". A ação da pessoa alvo deve ser descrita.
 """
 
 GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre impacto para Defesa/Orçamento."
@@ -1003,10 +1006,15 @@ async def processar_dou_ia(
     pubs_analisadas = []
     tasks = []
     
-    for p in res_padrao.publications:
-        # Se for Seção 2, usa o prompt exclusivo de pessoal
+for p in res_padrao.publications:
+        # Se for Seção 2, usa o prompt exclusivo de pessoal e injeta o alvo
         if p.section and ("DO2" in p.section or "Seção 2" in p.section):
-            prompt = GEMINI_PESSOAL_PROMPT
+            # Extrai do sistema QUEM fez a matéria ser capturada (ex: "Pessoal: Menção a 'HERALDO'")
+            alvo_identificado = p.relevance_reason or "Militar/Servidor de interesse"
+            
+            # Adiciona o alvo como uma ordem estrita no final do prompt
+            prompt = GEMINI_PESSOAL_PROMPT + f"\n\n[ALVO IDENTIFICADO PELO SISTEMA: {alvo_identificado}]\nDescreva apenas a ação referente a este alvo."
+            
         # Se for Seção 1/Outros, mantém a lógica original
         else:
             prompt = GEMINI_MPO_PROMPT if p.is_mpo_navy_hit else GEMINI_MASTER_PROMPT
