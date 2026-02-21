@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.2 (Fix: Ementa Score + Telegram)
+# Versão: 21.2 (Fix: Ementa Score + Telegram + Secao 2 Isolada)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -419,6 +419,13 @@ Abre crédito para o Ministério da Saúde.
 
 """
 
+GEMINI_PESSOAL_PROMPT = """
+Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
+Sua única missão é: identificar as pessoas de interesse mencionadas no texto e resumir em UMA frase curta (máximo 2 linhas) para qual cargo, missão, tarefa ou ato elas foram designadas/afetadas (ex: nomeação, exoneração, viagem, pensão).
+Exemplo de saída: "O [Posto] [NOME] foi designado(a) para [Ação/Tarefa]." ou "[NOME] teve seu afastamento autorizado para [Local/Evento]."
+NUNCA responda "Sem impacto". Toda publicação enviada para você neste contexto é relevante e a ação da pessoa deve ser descrita.
+"""
+
 GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre impacto para Defesa/Orçamento."
 
 # --- Configuração Google Drive Auth ---
@@ -645,7 +652,6 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     
     # --- FIM DA CORREÇÃO ---
     
-    # Lógica de Relevância (Mantida idêntica)
     # Lógica de Relevância
     is_relevant = False
     reason = None
@@ -733,8 +739,8 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
                 break
             
     if is_relevant:
-        try: soup_full_clean = BeautifulSoup(full_text_content, "lxml-xml")
-        except: soup_full_clean = BeautifulSoup(full_text_content, "html.parser")
+        try: soup_full_clean = BeautifulSoup(texto_limpo, "lxml-xml")
+        except: soup_full_clean = BeautifulSoup(texto_limpo, "html.parser")
         clean_text_for_ia = norm(soup_full_clean.get_text(strip=True))
         return Publicacao(
             organ=organ, type=act_type, summary=summary, raw=display_text, relevance_reason=reason,
@@ -998,7 +1004,13 @@ async def processar_dou_ia(
     tasks = []
     
     for p in res_padrao.publications:
-        prompt = GEMINI_MPO_PROMPT if p.is_mpo_navy_hit else GEMINI_MASTER_PROMPT
+        # Se for Seção 2, usa o prompt exclusivo de pessoal
+        if p.section and ("DO2" in p.section or "Seção 2" in p.section):
+            prompt = GEMINI_PESSOAL_PROMPT
+        # Se for Seção 1/Outros, mantém a lógica original
+        else:
+            prompt = GEMINI_MPO_PROMPT if p.is_mpo_navy_hit else GEMINI_MASTER_PROMPT
+            
         tasks.append(analyze_single_pub(p, model, prompt))
 
     results = await asyncio.gather(*tasks)
@@ -1012,7 +1024,13 @@ async def analyze_single_pub(pub: Publicacao, model, prompt_template):
     try:
         analysis = await get_ai_analysis(pub.clean_text or pub.raw, model, prompt_template)
         if analysis:
-            if "sem impacto" in analysis.lower() and not pub.is_mpo_navy_hit: return None
+            # Verifica se é uma publicação da Seção 2
+            is_secao_2 = pub.section and ("DO2" in pub.section or "Seção 2" in pub.section)
+            
+            # Só descarta se disser "sem impacto" E NÃO for MPO E NÃO for Seção 2
+            if "sem impacto" in analysis.lower() and not pub.is_mpo_navy_hit and not is_secao_2: 
+                return None
+                
             pub.relevance_reason = analysis
         return pub
     except: return pub
