@@ -646,9 +646,28 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
     # --- FIM DA CORREÇÃO ---
     
     # Lógica de Relevância (Mantida idêntica)
+    # Lógica de Relevância
     is_relevant = False
     reason = None
-    search_content_lower = norm(full_text_content).lower()
+    
+    # --- 1. LIMPEZA PROFUNDA (REGEX) ANTES DE QUALQUER VERIFICAÇÃO ---
+    # Remove tags XML estruturais (ex: <Assina>nome</Assina> ou <materia:Cargo>cargo</materia:Cargo>)
+    texto_limpo = re.sub(
+        r"<(?:\w+:)?(?:Assina|Cargo|Identifica-Signatario)[^>]*>.*?</(?:\w+:)?(?:Assina|Cargo|Identifica-Signatario)>", 
+        "", 
+        full_text_content, 
+        flags=re.IGNORECASE | re.DOTALL
+    )
+    # Remove tags HTML de parágrafo/div com classes de assinatura (ex: <p class="assina">nome</p>)
+    texto_limpo = re.sub(
+        r"<(?:p|div)[^>]*class=[\"']?(?:assina|cargo|identifica-signatario)[\"']?[^>]*>.*?</(?:p|div)>", 
+        "", 
+        texto_limpo, 
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    # 2. AGORA SIM, cria a string de busca a partir do texto SEM assinaturas
+    search_content_lower = norm(texto_limpo).lower()
     clean_text_for_ia = ""
     is_mpo_navy_hit_flag = False
     
@@ -686,22 +705,13 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
                 is_relevant = True
                 reason = "Ato orçamentário geral."
 
-elif "DO2" in section:
-        # Cria um objeto BeautifulSoup apenas para limpeza da Seção 2
-        try: 
-            soup_copy = BeautifulSoup(full_text_content, "lxml-xml")
-        except: 
-            soup_copy = BeautifulSoup(full_text_content, "html.parser")
+    elif "DO2" in section:
+        # Usa o texto limpo para criar o parser final
+        try: soup_copy = BeautifulSoup(texto_limpo, "lxml-xml")
+        except: soup_copy = BeautifulSoup(texto_limpo, "html.parser")
         
-        # REMOVE AS ASSINATURAS E CARGOS ANTES DA VERIFICAÇÃO
-        # Isso evita que o robô dispare se o nome/tag estiver no rodapé do ato
-        for tag in soup_copy.find_all(["p", "div"], class_=["assina", "cargo", "identifica-signatario"]):
-            tag.decompose()
-        
-        # Obtém o texto limpo (sem as assinaturas)
         clean_search_content_lower = norm(soup_copy.get_text(strip=True)).lower()
         
-        # Agora a verificação é feita apenas no que restou do texto
         for term in TERMS_AND_ACRONYMS_S2:
             if term.lower() in clean_search_content_lower:
                 is_relevant = True
