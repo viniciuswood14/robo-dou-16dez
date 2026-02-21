@@ -347,22 +347,22 @@ Busque impactos financeiros DIREtos (valores em R$) para:
 Selecione APENAS UM dos formatos abaixo e imprima SOMENTE ELE (sem adicionar mais nenhuma palavra):
 
 Se for Crédito Suplementar COM Impacto MB/MD (cite os valores da Marinha):
-⚓ MB:
+MB:
 ✅Suplementações (Total) – R$ [Valor]
 [Ação]: R$ [Valor]
 ✅Cancelamentos (Total) – R$ [Valor]
 [Ação]: R$ [Valor]
 
 Se for Movimentação e Empenho COM Impacto MB/MD (Limites):
-⚓ MD:
+MD:
 ✅Ampliação do Limite de Movimentação e Empenho:
 RP2: R$ [Valor] / RP3: R$ [Valor]
 
 Se for GND ou Fonte COM Impacto MB/MD:
-⚓ Alteração [GND ou Fonte]: [Descrição] - R$ [Valor]
+Alteração [GND ou Fonte]: [Descrição] - R$ [Valor]
 
 Se o ato NÃO citar as UOs acima ou tratar apenas de diretrizes transversais genéricas (mesmo sendo do MGI/MPO/MF):
-⚓ MB: Para conhecimento. Sem impacto para a Marinha. [Apenas se o ato trouxer alguma regra administrativa transversal, adicione 1 frase curta colada resumindo. Ex: "A portaria trata de regras sobre consignações em folha de pagamento". Se for apenas crédito/orçamento para outros ministérios da saúde/educação, feche o texto na palavra "Marinha." sem resumir].
+MB: Para conhecimento. Sem impacto para a Marinha. [Apenas se o ato trouxer alguma regra administrativa transversal, adicione 1 frase curta colada resumindo. Ex: "A portaria trata de regras sobre consignações em folha de pagamento". Se for apenas crédito/orçamento para outros ministérios da saúde/educação, feche o texto na palavra "Marinha." sem resumir].
 """
 GEMINI_PESSOAL_PROMPT = """
 Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
