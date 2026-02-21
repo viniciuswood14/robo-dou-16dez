@@ -1006,15 +1006,12 @@ async def processar_dou_ia(
     pubs_analisadas = []
     tasks = []
     
-for p in res_padrao.publications:
+    for p in res_padrao.publications:
         # Se for Seção 2, usa o prompt exclusivo de pessoal e injeta o alvo
         if p.section and ("DO2" in p.section or "Seção 2" in p.section):
-            # Extrai do sistema QUEM fez a matéria ser capturada (ex: "Pessoal: Menção a 'HERALDO'")
+            # Extrai do sistema QUEM fez a matéria ser capturada
             alvo_identificado = p.relevance_reason or "Militar/Servidor de interesse"
-            
-            # Adiciona o alvo como uma ordem estrita no final do prompt
             prompt = GEMINI_PESSOAL_PROMPT + f"\n\n[ALVO IDENTIFICADO PELO SISTEMA: {alvo_identificado}]\nDescreva apenas a ação referente a este alvo."
-            
         # Se for Seção 1/Outros, mantém a lógica original
         else:
             prompt = GEMINI_MPO_PROMPT if p.is_mpo_navy_hit else GEMINI_MASTER_PROMPT
@@ -1022,6 +1019,7 @@ for p in res_padrao.publications:
         tasks.append(analyze_single_pub(p, model, prompt))
 
     results = await asyncio.gather(*tasks)
+    
     for p_res in results:
         if p_res: pubs_analisadas.append(p_res)
             
