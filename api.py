@@ -653,6 +653,7 @@ def process_grouped_materia(main_article: BeautifulSoup, full_text_content: str,
         if not is_relevant and is_central_budget_organ:
             if any(bkw in search_content_lower for bkw in BUDGET_KEYWORDS_S1):
                 is_relevant = True
+                is_mpo_navy_hit_flag = True # <-- IMUNIDADE TOTAL ADICIONADA AQUI
                 reason = "Ato orçamentário geral."
 
     elif "DO2" in section:
