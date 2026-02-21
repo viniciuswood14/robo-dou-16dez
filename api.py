@@ -400,25 +400,6 @@ Recebe Fonte [X] / Cancela Fonte [Y]: R$ [Valor]
 - **Formato de Saída:**
 ⚓ MB: Para conhecimento. Sem impacto para a Marinha.
 
-### MODELO DE ESTILO FINAL
-Sua resposta final deve seguir rigorosamente a estética abaixo:
-
-Análise IA
-
-Abre aos Orçamentos Fiscal... (texto resumo) ...vigente.
-⚓ MB:
-✅Suplementações (Total) – R$ 1.001.000.000
-14T7 (PNM): R$ 842.200.000
-✅Cancelamentos (Total) – R$ 445.867.720
-FN AO 0Z00 Reserva de Contingência: R$ 316.383.161
-
-Abre crédito para o Ministério da Saúde.
-⚓ MB: Para conhecimento. Sem impacto para a Marinha.
-
-(Repetir para todos os atos encontrados).
-
-"""
-
 GEMINI_PESSOAL_PROMPT = """
 Você é um assistente de inteligência da Marinha do Brasil analisando publicações de pessoal (Seção 2 do DOU).
 Sua única missão é: ler a publicação e resumir em UMA frase curta (máximo 2 linhas) o que aconteceu EXCLUSIVAMENTE com o nosso "Alvo Identificado" (ex: para qual cargo, missão, tarefa ou ato ele foi designado/afetado).
