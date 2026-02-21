@@ -1,5 +1,5 @@
-## Nome do arquivo: run_check.py
-# Versão: 19.1 (Add: Sincronização Automática Gmail -> GitHub + Fix Seção 2 e Ementa Score)
+# Nome do arquivo: run_check.py
+# Versão: 19.2 (Remoção do Fallback e Auto-Retry no InLabs)
 
 import asyncio
 import json
@@ -28,7 +28,7 @@ try:
         GEMINI_API_KEY,
         GEMINI_MASTER_PROMPT,
         GEMINI_MPO_PROMPT,
-        GEMINI_PESSOAL_PROMPT, # <- ADICIONADO NOVO PROMPT DE PESSOAL
+        GEMINI_PESSOAL_PROMPT,
         Publicacao
     )
 except ImportError as e:
@@ -55,13 +55,6 @@ try:
 except ImportError:
     pass
 
-# --- [IMPORTAÇÃO FALLBACK] ---
-try:
-    from dou_fallback import executar_fallback
-except ImportError:
-    print("Aviso: 'dou_fallback.py' não encontrado. Redundância desativada.")
-    executar_fallback = None
-
 # --- [IMPORTAÇÃO LEGISLATIVO] ---
 try:
     from check_legislativo import rotina_legislativa_completa
@@ -73,7 +66,7 @@ except Exception as e:
     print(f"❌ ERRO DESCONHECIDO ao carregar legislativo: {e}")
     rotina_legislativa_completa = None
 
-# --- [NOVO: IMPORTAÇÃO SYNC PAC (GMAIL)] ---
+# --- [IMPORTAÇÃO SYNC PAC (GMAIL)] ---
 try:
     from sync_pac import sync_pac_routine
     print("✅ Módulo Sync PAC (Gmail) importado com sucesso!")
@@ -108,10 +101,9 @@ def save_state(state: Dict[str, List[str]]):
 
 async def check_and_process_dou(today_str: str):
     """
-    Função principal (MODO SEGURANÇA + HEARTBEAT).
-    Avisa no Telegram mesmo se não encontrar nada.
+    Função principal. Agora depende 100% do InLabs com sistema de Auto-Retry.
     """
-    print(f"--- Iniciando verificação do DOU para a data: {today_str} (SEM PARSER) ---")
+    print(f"--- Iniciando verificação do DOU para a data: {today_str} ---")
     
     # 0. Configura IA
     if not GEMINI_API_KEY:
@@ -120,167 +112,134 @@ async def check_and_process_dou(today_str: str):
         return
     genai.configure(api_key=GEMINI_API_KEY)
     try:
-        model = genai.GenerativeModel("gemini-3-pro-preview")
+        model = genai.GenerativeModel("gemini-3-pro-preview") # Mantido igual ao do site
     except Exception as e:
         print(f"Falha IA: {e}")
         return
 
     state = load_state()
     processed_zips_today = set(state.get(today_str, []))
-    
-    # Flag para saber se usamos o fallback hoje para não repetir
-    fallback_marker = f"FALLBACK_DONE_{today_str}"
-    if fallback_marker in processed_zips_today:
-        print("Modo Fallback já foi executado com sucesso hoje. Pulando.")
-        return
 
     pubs_finais: List[Publicacao] = []
-    usou_fallback = False
     sucesso_inlabs = False
     client = None
+    MAX_RETRIES = 3
 
-    # --- TENTATIVA 1: INLABS ---
-    try:
-        print(">>> Tentando conexão InLabs (Principal)...")
-        client = await inlabs_login_and_get_session()
-        listing_url = await resolve_date_url(client, today_str)
-        html = await fetch_listing_html(client, today_str)
-        all_zip_links = pick_zip_links_from_listing(html, listing_url, ["DO1", "DO2", "DO3"])
-        
-        if not all_zip_links:
-            msg = f"🔎 Monitoramento DOU ({today_str}): Nenhum arquivo ZIP disponível no InLabs no momento."
-            print(msg)
-            await send_telegram_message(msg)
-            return 
-
-        # Filtra novos
-        current_zip_set = set(all_zip_links)
-        new_zip_links = list(current_zip_set - processed_zips_today)
-
-        if not new_zip_links:
-            msg = f"✅ Monitoramento DOU ({today_str}): Nenhuma nova edição lançada desde a última verificação."
-            print(msg)
-            await send_telegram_message(msg)
-            return
-
-        print(f"Encontrados {len(new_zip_links)} novos arquivos ZIP.")
-        await send_telegram_message(f"📥 Baixando {len(new_zip_links)} novos arquivos ZIP do DOU...")
-        
-        # Processa ZIPs (Extração Bruta)
-        all_new_xml_blobs = []
-        for zurl in new_zip_links:
-            print(f"Baixando {zurl}...")
-            zb = await download_zip(client, zurl)
-            all_new_xml_blobs.extend(extract_xml_from_zip(zb))
-        
-        if not all_new_xml_blobs:
-            msg = f"⚠️ Monitoramento DOU ({today_str}): ZIPs baixados, mas parecem vazios ou sem XML."
-            print(msg)
-            await send_telegram_message(msg)
-            state[today_str] = list(current_zip_set)
-            save_state(state)
-            return
-
-        # Agrupa e Filtra (Lógica com Ementa Score - Idêntica ao api.py)
-        materias = {}
-        for blob in all_new_xml_blobs:
-            try:
-                soup = BeautifulSoup(blob, "lxml-xml")
-                article = soup.find("article")
-                if not article: continue
-                
-                materia_id = article.get("idMateria")
-                if not materia_id: continue
-                
-                # O dicionário agora guarda um 'score' para saber qual arquivo tem a maior Ementa
-                if materia_id not in materias:
-                    materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
-                    
-                materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
-                
-                body = article.find("body")
-                if body:
-                    # Lê as tags REAIS usando o BeautifulSoup
-                    ementa_tag = article.find("Ementa")
-                    identifica_tag = article.find("Identifica")
-                    
-                    # Pega apenas o texto puro (ignorando tags e CDATA)
-                    ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
-                    identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
-                    
-                    # Soma a quantidade de letras úteis
-                    score = len(ementa_text) + len(identifica_text)
-                    
-                    # Se este arquivo tiver um texto de Ementa MAIOR que o anterior, ele assume como principal!
-                    if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
-                        materias[materia_id]["main_article"] = article
-                        materias[materia_id]["score"] = score
-            except: continue
-        
-        for materia_id, content in materias.items():
-            if content["main_article"]:
-                publication = process_grouped_materia(
-                    content["main_article"], content["full_text"], custom_keywords=[]
-                )
-                if publication:
-                    pubs_finais.append(publication)
-
-        # Deduplicar Geral
-        seen = set()
-        unique_pubs = []
-        for p in pubs_finais:
-            key = (p.organ or "") + "||" + (p.type or "") + "||" + (p.summary or "")[:100]
-            if key not in seen:
-                seen.add(key)
-                unique_pubs.append(p)
-        pubs_finais = unique_pubs
-        
-        sucesso_inlabs = True
-        state[today_str] = list(current_zip_set)
-
-    except Exception as e:
-        print(f"⚠️ Erro no InLabs: {e}")
-        usou_fallback = True
-        
-    finally:
-        if client: await client.aclose()
-
-    # --- TENTATIVA 2: FALLBACK (Se InLabs falhou) ---
-    if usou_fallback and executar_fallback:
-        print(">>> Iniciando Modo de Redundância (Fallback)...")
-        await send_telegram_message("⚠️ InLabs instável. Iniciando busca redundante (Fallback)...")
+    # --- PROCESSAMENTO INLABS (COM RETRY) ---
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            res_fallback = await executar_fallback(today_str, [])
+            print(f">>> Tentando conexão InLabs (Tentativa {attempt}/{MAX_RETRIES})...")
+            client = await inlabs_login_and_get_session()
+            listing_url = await resolve_date_url(client, today_str)
+            html = await fetch_listing_html(client, today_str)
+            all_zip_links = pick_zip_links_from_listing(html, listing_url, ["DO1", "DO2", "DO3"])
             
-            if res_fallback:
-                print(f"Fallback encontrou {len(res_fallback)} itens.")
-                for item in res_fallback:
-                    p = Publicacao(
-                        organ=item['organ'],
-                        type=item['type'],
-                        summary=item['summary'],
-                        raw=item['raw'],
-                        relevance_reason=item['relevance_reason'],
-                        section=item['section'],
-                        clean_text=item['raw'],
-                        is_parsed_mpo=False # Fallback é genérico
-                    )
-                    pubs_finais.append(p)
-                
-                current_list = state.get(today_str, [])
-                current_list.append(fallback_marker)
-                state[today_str] = current_list
-            else:
-                msg = "⚠️ Fallback: Busca realizada, mas nada relevante encontrado."
+            if not all_zip_links:
+                msg = f"🔎 Monitoramento DOU ({today_str}): Nenhum arquivo ZIP disponível no InLabs no momento."
+                print(msg)
+                if attempt == 1: # Só avisa no telegram na primeira vez para não flodar
+                    await send_telegram_message(msg)
+                if client: await client.aclose()
+                return 
+
+            # Filtra novos
+            current_zip_set = set(all_zip_links)
+            new_zip_links = list(current_zip_set - processed_zips_today)
+
+            if not new_zip_links:
+                msg = f"✅ Monitoramento DOU ({today_str}): Nenhuma nova edição lançada desde a última verificação."
+                print(msg)
+                if client: await client.aclose()
+                return
+
+            print(f"Encontrados {len(new_zip_links)} novos arquivos ZIP.")
+            await send_telegram_message(f"📥 Baixando {len(new_zip_links)} novos arquivos ZIP do DOU...")
+            
+            # Processa ZIPs (Extração Bruta)
+            all_new_xml_blobs = []
+            for zurl in new_zip_links:
+                print(f"Baixando {zurl}...")
+                zb = await download_zip(client, zurl)
+                all_new_xml_blobs.extend(extract_xml_from_zip(zb))
+            
+            if not all_new_xml_blobs:
+                msg = f"⚠️ Monitoramento DOU ({today_str}): ZIPs baixados, mas parecem vazios ou sem XML."
                 print(msg)
                 await send_telegram_message(msg)
+                state[today_str] = list(current_zip_set)
+                save_state(state)
+                if client: await client.aclose()
+                return
 
-        except Exception as ef:
-            print(f"Erro CRÍTICO: Falha também no Fallback: {ef}")
-            await send_telegram_message(f"❌ Erro Crítico Total (InLabs + Fallback): {ef}")
-            return
+            # Agrupa e Filtra (Lógica com Ementa Score)
+            materias = {}
+            for blob in all_new_xml_blobs:
+                try:
+                    soup = BeautifulSoup(blob, "lxml-xml")
+                    article = soup.find("article")
+                    if not article: continue
+                    
+                    materia_id = article.get("idMateria")
+                    if not materia_id: continue
+                    
+                    if materia_id not in materias:
+                        materias[materia_id] = {"main_article": None, "full_text": "", "score": -1}
+                        
+                    materias[materia_id]["full_text"] += (blob.decode("utf-8", errors="ignore") + "\n")
+                    
+                    body = article.find("body")
+                    if body:
+                        ementa_tag = article.find("Ementa")
+                        identifica_tag = article.find("Identifica")
+                        
+                        ementa_text = ementa_tag.text.strip() if ementa_tag and ementa_tag.text else ""
+                        identifica_text = identifica_tag.text.strip() if identifica_tag and identifica_tag.text else ""
+                        
+                        score = len(ementa_text) + len(identifica_text)
+                        
+                        if materias[materia_id]["main_article"] is None or score > materias[materia_id]["score"]:
+                            materias[materia_id]["main_article"] = article
+                            materias[materia_id]["score"] = score
+                except: continue
+            
+            for materia_id, content in materias.items():
+                if content["main_article"]:
+                    publication = process_grouped_materia(
+                        content["main_article"], content["full_text"], custom_keywords=[]
+                    )
+                    if publication:
+                        pubs_finais.append(publication)
 
-    # --- ANÁLISE COM IA (Todas as publicações) ---
+            # Deduplicar Geral
+            seen = set()
+            unique_pubs = []
+            for p in pubs_finais:
+                key = (p.organ or "") + "||" + (p.type or "") + "||" + (p.summary or "")[:100]
+                if key not in seen:
+                    seen.add(key)
+                    unique_pubs.append(p)
+            pubs_finais = unique_pubs
+            
+            sucesso_inlabs = True
+            state[today_str] = list(current_zip_set)
+            if client: await client.aclose()
+            
+            break # DEU CERTO! Sai do loop de Retry
+
+        except Exception as e:
+            print(f"⚠️ Erro no InLabs (Tentativa {attempt}): {e}")
+            if client: await client.aclose()
+            if attempt < MAX_RETRIES:
+                print("Aguardando 10 segundos antes da próxima tentativa...")
+                await asyncio.sleep(10)
+            else:
+                msg = f"❌ Erro Crítico: Falha ao acessar InLabs após {MAX_RETRIES} tentativas. O robô aguardará o próximo ciclo."
+                print(msg)
+                await send_telegram_message(msg)
+                return # Encerra após esgotar tentativas
+
+
+    # --- ANÁLISE COM IA (Todas as publicações capturadas) ---
     if not pubs_finais:
         if sucesso_inlabs: save_state(state)
         msg = f"ℹ️ Monitoramento DOU ({today_str}): Arquivos processados, mas nenhuma matéria passou pelos filtros de Keywords."
@@ -294,7 +253,6 @@ async def check_and_process_dou(today_str: str):
     tasks = []
 
     for p in pubs_finais:
-        # Mesma lógica do api.py: Identifica Seção 2 e injeta o alvo
         if p.section and ("DO2" in p.section or "Seção 2" in p.section):
             alvo_identificado = p.relevance_reason or "Militar/Servidor de interesse"
             prompt_to_use = GEMINI_PESSOAL_PROMPT + f"\n\n[ALVO IDENTIFICADO PELO SISTEMA: {alvo_identificado}]\nDescreva apenas a ação referente a este alvo."
@@ -316,7 +274,7 @@ async def check_and_process_dou(today_str: str):
         
         is_secao_2 = p.section and ("DO2" in p.section or "Seção 2" in p.section)
         
-        # Filtro de relevância da IA (Agora BLINDADO para a Seção 2)
+        # Filtro de relevância da IA
         if "sem impacto" in ai_out.lower() and not p.is_mpo_navy_hit and not is_secao_2:
             continue
             
@@ -330,13 +288,9 @@ async def check_and_process_dou(today_str: str):
         await send_telegram_message(msg)
         return
 
-    # --- ENVIO TELEGRAM (POSIIVO) ---
+    # --- ENVIO TELEGRAM ---
     texto_zap = monta_whatsapp(pubs_ready, today_str)
-    
     header = f"Alerta de Publicações - DOU ({today_str})\n"
-    if usou_fallback:
-        header += "⚠️ *Aviso: Dados via portal público (InLabs instável).*\n"
-    
     final_msg = header + "\n" + texto_zap
     
     await send_telegram_message(final_msg)
@@ -356,14 +310,12 @@ async def main_loop():
     
     valor_check_done = False
     pac_check_done = False
-    pac_sync_done = False # <--- Flag de controle do Sync Gmail
+    pac_sync_done = False 
     
-    # Controle de hora para o Legislativo (para não rodar a cada 10 min)
     last_legis_hour = -1 
-    
     last_day = None
     
-    print("--- Robô Integrado (Safety Mode + Heartbeat) Iniciado ---")
+    print("--- Robô Integrado (InLabs Exclusive Mode) Iniciado ---")
 
     while True:
         agora = datetime.now(TZ_BRASILIA)
@@ -375,7 +327,7 @@ async def main_loop():
         if last_day != hoje_str:
             valor_check_done = False
             pac_check_done = False
-            pac_sync_done = False # <--- Reseta a flag do Sync
+            pac_sync_done = False 
             last_day = hoje_str
             print(f"*** Novo dia: {hoje_str} ***")
 
@@ -408,13 +360,10 @@ async def main_loop():
                     print(f"Erro PAC: {e}")
 
             # 4. SYNC PAC GMAIL (06:00+, dias úteis)
-            # Roda depois do PAC check original ou para preparar o dia seguinte
-            # Como atualiza o GitHub, vai triggerar um rebuild do Render
-            if is_weekday and agora.hour == 7 and agora.minute >= 0 and not pac_sync_done:
+            if is_weekday and agora.hour == 6 and agora.minute >= 0 and not pac_sync_done:
                 if sync_pac_routine:
                     print(f"[{agora.strftime('%H:%M')}] 🔄 Rodando Sincronização PAC (Gmail -> Github)...")
                     try:
-                        # Executa a rotina (síncrona)
                         sync_pac_routine()
                         pac_sync_done = True
                         print("✅ Sync PAC finalizado.")
@@ -422,16 +371,14 @@ async def main_loop():
                         print(f"❌ Erro Sync PAC: {e}")
 
             # 5. LEGISLATIVO (Rodar 1 vez por hora, a partir das 08h)
-            # Verifica se o módulo foi importado e se mudou a hora desde a última checagem
             if rotina_legislativa_completa and agora.hour != last_legis_hour:
-                if agora.hour >= 8: # Evita rodar de madrugada quando não há sessões
+                if agora.hour >= 8: 
                     try:
                         print(f"[{agora.strftime('%H:%M')}] Executando rotina legislativa...")
                         await rotina_legislativa_completa()
-                        last_legis_hour = agora.hour # Atualiza flag para não rodar de novo nesta hora
+                        last_legis_hour = agora.hour 
                     except Exception as e:
                         print(f"Erro Legislativo: {e}")
-                        # Opcional: await send_telegram_message(f"⚠️ Erro Legislativo: {e}")
 
         else:
             print(f"[{agora.strftime('%H:%M')}] Fora de expediente. Dormindo.")
