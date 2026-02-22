@@ -74,7 +74,7 @@ async def check_and_process_valor(today_str: str):
         return
 
     # 4. Monta e envia a mensagem do Telegram
-    lines = [f"Alerta de novas publicações no Valor Econômico ({today_str}):\n"]
+    lines = [f"📰 *Radar de Notícias - Defesa & Orçamento* ({today_str}):\n"]
     
     for p in pubs_finais:
         # Nota: O Telegram usa 'Markdown', não 'WhatsApp'
