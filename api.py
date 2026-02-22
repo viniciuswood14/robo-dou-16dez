@@ -1,5 +1,5 @@
 # Nome do arquivo: api.py
-# Versão: 21.4 (Exclusividade InLabs com Auto-Retry)
+# Versão: 21.5 (InLabs Auto-Retry + Radar de Notícias + Prompts Estritos)
 
 from fastapi import FastAPI, Form, HTTPException, Path, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
@@ -63,7 +63,7 @@ except ImportError:
 # API SETUP
 # =====================================================================================
 
-app = FastAPI(title="Robô CORM API - v21.4")
+app = FastAPI(title="Robô CORM API - v21.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -265,7 +265,7 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
 
 @app.on_event("startup")
 async def startup_event():
-    print(">>> SISTEMA UNIFICADO INICIADO (v21.4 - Secure + Drive + Telegram + InLabs Exclusivo) <<<")
+    print(">>> SISTEMA UNIFICADO INICIADO (v21.5 - Auto-Retry + Radar de Notícias) <<<")
     
     # Validação PAC
     try:
@@ -370,7 +370,25 @@ Exemplo de saída: "O [Posto] [NOME DO ALVO] foi designado(a) para [Ação/Taref
 NUNCA responda "Sem impacto". A ação da pessoa alvo deve ser descrita.
 """
 
-GEMINI_VALOR_PROMPT = "Analista financeiro da Marinha. Resumo de 1 frase sobre impacto para Defesa/Orçamento."
+# --- NOVO RADAR DE NOTÍCIAS (DEFESA E FISCAL) ---
+GEMINI_NOTICIAS_PROMPT = """
+Você é um analista de inteligência da Marinha do Brasil.
+Sua missão é avaliar se o TÍTULO desta notícia é RELEVANTE para a alta gestão governamental e militar.
+
+TEMAS ALVO:
+1. Defesa: Ações, projetos estratégicos, orçamento e operações da Marinha do Brasil ou Ministério da Defesa.
+2. Fiscal/Orçamento: Tramitação da LOA/PLOA/LDO no Congresso, arcabouço fiscal, superávit/déficit fiscal, bloqueio/contingenciamento de gastos federais.
+
+REGRA DE OURO: Se a notícia for sobre mercado financeiro (bolsa, dólar), empresas privadas, política partidária sem impacto fiscal, ou matérias policiais rotineiras, responda APENAS com a frase exata: "Sem impacto direto."
+
+Se for relevante aos Temas Alvo, escreva um resumo de 1 frase (máx 2 linhas) apontando o impacto ou a relevância da notícia.
+"""
+
+SEARCH_QUERIES = [
+    '"Marinha do Brasil" OR "Ministério da Defesa"',
+    '"meta fiscal" OR "superávit" OR "déficit fiscal" OR "corte de gastos"',
+    '"LOA" OR "LDO" OR "PLOA" OR "Orçamento da União"'
+]
 
 # --- Configuração Google Drive Auth ---
 SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
@@ -507,9 +525,9 @@ def monta_whatsapp(pubs: List[Publicacao], when: str) -> str:
     return "\n".join(lines)
 
 def monta_valor_whatsapp(pubs: List[ValorPublicacao], when: str) -> str:
-    lines = [f"Notícias Valor Econômico ({when}):", ""]
+    lines = [f"📰 *Radar de Notícias (Defesa & Fiscal)* - {when}:\n"]
     for p in pubs:
-        lines.append(f"▶️ {p.titulo}")
+        lines.append(f"▶️ *{p.titulo}*")
         lines.append(f"📌 {p.link}")
         lines.append(f"⚓ {p.analise_ia}")
         lines.append("")
@@ -831,7 +849,7 @@ async def processar_inlabs(
 
     pubs_final: List[Publicacao] = []
     
-    print(f">>> Tentando InLabs (v21.4) com Retry para {data}...")
+    print(f">>> Tentando InLabs (v21.5) com Retry para {data}...")
     MAX_RETRIES = 3
     sucesso_inlabs = False
     last_error = None
@@ -1026,34 +1044,12 @@ async def processar_valor_ia(data: str = Form(...)):
     pubs_model = [ValorPublicacao(**p) for p in pubs_list]
     return ProcessResponseValor(date=data, count=len(pubs_model), publications=pubs_model, whatsapp_text=monta_valor_whatsapp(pubs_model, data))
 
-async def crawl_valor_headlines(cover_url: str, date_str: str) -> List[Dict[str, str]]:
-    print(f"[Valor Crawler] Acessando capa: {cover_url}")
-    found_articles = []
-    date_clean = date_str.replace("-", "") 
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = await client.get(cover_url, headers=headers)
-            if r.status_code != 200: return []
-            soup = BeautifulSoup(r.text, "html.parser")
-            for a in soup.find_all("a", href=True):
-                href = a["href"]
-                title = norm(a.get_text())
-                if date_clean in href and len(href) > len(f"/impresso/{date_clean}/"):
-                    full_link = href if href.startswith("http") else f"https://valor.globo.com{href}"
-                    if title and len(title) > 10 and not any(f['link'] == full_link for f in found_articles):
-                         found_articles.append({"title": title, "link": full_link})
-            return found_articles
-        except Exception: return []
-
-SEARCH_QUERIES = ['"contas publicas" OR "politica fiscal"', '"orcamento" OR "LDO" OR "LOA"', '"economia" OR "defesa" OR "marinha"']
-
 async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Dict[str, Any]], Set[str]):
     if not GEMINI_API_KEY: return [], set()
     genai.configure(api_key=GEMINI_API_KEY)
     try: model = genai.GenerativeModel("gemini-3-pro-preview")
     except: return [], set()
-    date_suffix = today_str.replace("-", "")
+    
     google_results = []
     for q in SEARCH_QUERIES:
         try:
@@ -1064,23 +1060,18 @@ async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Di
     
     final_articles, processed_links = [], set()
     for res in google_results:
-        if res.link.rstrip("/").endswith(date_suffix):
-            crawled = await crawl_valor_headlines(res.link, today_str)
-            for news in crawled:
-                if news['link'] not in processed_links:
-                    final_articles.append(news); processed_links.add(news['link'])
-        else:
-            if res.link not in processed_links:
-                final_articles.append({"title": res.title, "link": res.link}); processed_links.add(res.link)
+        if res.link not in processed_links:
+            final_articles.append({"title": res.title, "link": res.link})
+            processed_links.add(res.link)
     
     pubs_finais, links_encontrados = [], set()
     for item in final_articles:
-        text_check = item['title'].lower()
-        if any(k in text_check for k in ["orçamento", "fiscal", "defesa", "marinha", "gasto", "corte", "economia"]):
-            ai_reason = await get_ai_analysis(f"TÍTULO: {item['title']}", model, GEMINI_VALOR_PROMPT)
-            links_encontrados.add(item['link'])
-            if ai_reason and "sem impacto" not in ai_reason.lower():
-                pubs_finais.append({"titulo": item['title'], "link": item['link'], "analise_ia": ai_reason})
+        ai_reason = await get_ai_analysis(f"TÍTULO: {item['title']}", model, GEMINI_NOTICIAS_PROMPT)
+        links_encontrados.add(item['link'])
+        
+        if ai_reason and "sem impacto direto" not in ai_reason.lower():
+            pubs_finais.append({"titulo": item['title'], "link": item['link'], "analise_ia": ai_reason})
+            
     return pubs_finais, links_encontrados
 
 # --- Lógica PAC (Atualizada para CSV ROBUSTO) ---
