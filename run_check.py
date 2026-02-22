@@ -343,13 +343,20 @@ async def main_loop():
 
             is_weekday = agora.weekday() < 5
 
-            # 2. Valor (05:10+, dias úteis)
-            if is_weekday and agora.hour == 5 and agora.minute >= 10 and not valor_check_done:
+          # 2. Radar de Notícias (Roda às 08h, 13h e 18h em dias úteis)
+            horarios_noticias = [8, 13, 18]
+            
+            # Inicializa a variável de controle no topo do loop principal (caso não exista)
+            if 'last_news_hour' not in locals(): last_news_hour = -1
+
+            if is_weekday and agora.hour in horarios_noticias and agora.hour != last_news_hour:
                 try:
-                    await check_and_process_valor(ontem_str)
-                    valor_check_done = True
+                    print(f"[{agora.strftime('%H:%M')}] Executando Radar de Notícias (Defesa & Fiscal)...")
+                    # Note que agora enviamos 'hoje_str' para pegar as notícias frescas do dia
+                    await check_and_process_valor(hoje_str) 
+                    last_news_hour = agora.hour
                 except Exception as e:
-                    print(f"Erro Valor: {e}")
+                    print(f"Erro Radar de Notícias: {e}")
 
             # 3. PAC (05:15+, dias úteis) - DESATIVADO PARA NÃO ENVIAR NOTIFICAÇÃO
             # if is_weekday and agora.hour == 5 and agora.minute >= 15 and not pac_check_done:
