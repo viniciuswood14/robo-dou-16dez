@@ -1,15 +1,12 @@
 # Nome do arquivo: google_search.py
-# Versão: 14.0.5 (Busca por data exata)
+# Versão: 14.1 (Radar Aberto - Sem trava do Valor Econômico)
 
 import httpx
 import os
 from typing import List, Dict, Optional
 
-# ... (Configuração do GOOGLE_API_KEY e GOOGLE_CX_ID permanece igual) ...
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 GOOGLE_CX_ID = os.environ.get("GOOGLE_CX_ID")
-# --------------------------------------------------------------------------
-
 
 SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
 
@@ -27,7 +24,6 @@ class SearchResult(dict):
     def snippet(self) -> str:
         return self.get("snippet", "").replace("\n", " ")
 
-# --- [MODIFICAÇÃO v14.0.5] ---
 async def perform_google_search(query: str, search_date: str) -> List[SearchResult]:
     """
     Busca no Google CSE por uma query, filtrando por data EXATA.
@@ -48,8 +44,9 @@ async def perform_google_search(query: str, search_date: str) -> List[SearchResu
         print(f"Data inválida fornecida para busca: {search_date}. Erro: {e}")
         return []
 
-    # Removemos o "after:" da query e usamos o parâmetro 'sort'
-    full_query = f"{query} site:valor.globo.com/impresso"
+    # CORREÇÃO: Removemos a trava do "site:valor.globo.com"
+    # Agora a busca é feita livremente com base nas palavras-chave do api.py
+    full_query = query
     
     params = {
         "key": GOOGLE_API_KEY,
@@ -59,7 +56,6 @@ async def perform_google_search(query: str, search_date: str) -> List[SearchResu
         "sort": date_sort_param # Adiciona o filtro de data exata
     }
     
-    # ... (o resto da função permanece igual) ...
     results = []
     try:
         async with httpx.AsyncClient() as client:
@@ -80,4 +76,3 @@ async def perform_google_search(query: str, search_date: str) -> List[SearchResu
     except Exception as e:
         print(f"Exceção ao buscar no Google: {e}")
         return []
-# --- [FIM DA MODIFICAÇÃO v14.0.5] ---
