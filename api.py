@@ -224,36 +224,36 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
             
             print(f">>> [4/4] Baixando PDF (Forced Cookies): {url_download}")
             
-            request = client.build_request("GET", url_download, headers=download_headers)
+            # CORREÇÃO: Uso direto do client.get sem o 'async with' que estava quebrando o httpx
+            r_pdf = await client.get(url_download, headers=download_headers, timeout=90.0)
             
-            async with client.send(request, stream=True) as r_pdf:
-                if r_pdf.status_code != 200:
-                    return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo.", status_code=404)
-                
-                body_content = await r_pdf.aread()
-                tamanho = len(body_content)
-                print(f">>> Tamanho final: {tamanho} bytes")
-                
-                if tamanho < 20000: 
-                    try:
-                        texto = body_content.decode('utf-8', errors='ignore')
-                        titulo = texto.split("<title>")[1].split("</title>")[0] if "<title>" in texto else "Sem Título"
-                        print(f">>> CONTEÚDO ERRO: {titulo}")
-                    except: pass
-
-                    return Response(
-                        content=f"ERRO: O servidor rejeitou a sessão (Arquivo: {tamanho}b - {titulo}).",
-                        status_code=502
-                    )
+            if r_pdf.status_code != 200:
+                return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo.", status_code=404)
+            
+            body_content = r_pdf.content
+            tamanho = len(body_content)
+            print(f">>> Tamanho final: {tamanho} bytes")
+            
+            if tamanho < 20000: 
+                try:
+                    texto = body_content.decode('utf-8', errors='ignore')
+                    titulo = texto.split("<title>")[1].split("</title>")[0] if "<title>" in texto else "Sem Título"
+                    print(f">>> CONTEÚDO ERRO: {titulo}")
+                except: pass
 
                 return Response(
-                    content=body_content,
-                    media_type="application/pdf",
-                    headers={
-                        "Content-Disposition": f"attachment; filename={filename}",
-                        "Content-Length": str(tamanho)
-                    }
+                    content=f"ERRO: O servidor rejeitou a sessão (Arquivo: {tamanho}b - {titulo}).",
+                    status_code=502
                 )
+
+            return Response(
+                content=body_content,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename}",
+                    "Content-Length": str(tamanho)
+                }
+            )
 
         except Exception as e:
             print(f"Erro Crítico: {e}")
