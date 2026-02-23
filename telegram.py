@@ -24,6 +24,7 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 async def send_telegram_message(text: str) -> bool:
     """
     Envia uma mensagem de texto formatada para o grupo do Telegram.
+    Se a formatação falhar, tenta enviar como texto puro.
     """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("❌ Erro Telegram: Token ou Chat ID não encontrados (Verifique ENV ou config.json).")
@@ -33,6 +34,7 @@ async def send_telegram_message(text: str) -> bool:
     if len(text) > 4096:
         text = text[:4090] + "\n(...)"
 
+    # Tenta enviar com formatação Markdown (padrão)
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
         'text': text,
@@ -46,6 +48,24 @@ async def send_telegram_message(text: str) -> bool:
         if response.status_code == 200:
             print("✅ Mensagem enviada ao Telegram com sucesso!")
             return True
+            
+        # SE DEU ERRO DE FORMATAÇÃO (400 - can't parse entities)
+        elif response.status_code == 400 and "can't parse entities" in response.text:
+            print(f"⚠️ Erro de formatação no Telegram (Markdown quebrado). Reenviando como texto puro...")
+            
+            # Remove o parse_mode e envia de novo para garantir a entrega
+            payload_fallback = {
+                'chat_id': TELEGRAM_CHAT_ID,
+                'text': text
+            }
+            response_fallback = await client.post(TELEGRAM_API_URL, data=payload_fallback, timeout=10)
+            
+            if response_fallback.status_code == 200:
+                print("✅ Mensagem enviada ao Telegram (em texto puro) com sucesso!")
+                return True
+            else:
+                print(f"❌ Erro API Telegram (Fallback): {response_fallback.status_code} - {response_fallback.text}")
+                return False
         else:
             print(f"❌ Erro API Telegram: {response.status_code} - {response.text}")
             return False
