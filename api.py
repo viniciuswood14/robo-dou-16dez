@@ -150,102 +150,49 @@ def pick_pdf_link_from_listing(html: str, base_url_for_rel: str, section_key: st
 # ==========================================
 @app.get("/download-pdf-inlabs")
 async def download_pdf_inlabs(date: str, section: str = "do1"):
-    print(f">>> [PDF InLabs Force] Iniciando fluxo para: {date} ({section})")
+    print(f">>> [PDF InLabs] Iniciando fluxo simplificado e robusto para: {date} ({section})")
     
-    # 1. Configura Login
-    if "CONFIG" not in globals():
-        email = os.getenv("INLABS_EMAIL")
-        senha = os.getenv("INLABS_PASSWORD")
-    else:
-        email = CONFIG.get("inlabs_email") or os.getenv("INLABS_EMAIL")
-        senha = CONFIG.get("inlabs_password") or os.getenv("INLABS_PASSWORD")
-    
-    if not email or not senha:
-        return Response(content="Credenciais InLabs não configuradas.", status_code=500)
-
-    # 2. Prepara URLs
     try:
-        dt_obj = datetime.strptime(date, "%Y-%m-%d")
-        data_pt = dt_obj.strftime("%d-%m-%Y")
-        param_p = dt_obj.strftime("%Y-%m-%d")
+        # 1. Usa o mesmo login robusto que já funciona perfeitamente para os XMLs
+        client = await inlabs_login_and_get_session()
         
-        sec_code = section.lower()
-        filename = f"{dt_obj.strftime('%Y_%m_%d')}_ASSINADO_{sec_code}.pdf"
-        
-        url_leitura = f"https://www.in.gov.br/leiturajornal?data={data_pt}&secao={section}"
-        url_download = f"https://inlabs.in.gov.br/index.php?p={param_p}&dl={filename}"
-        
-    except Exception as e:
-        return Response(content=f"Erro data: {str(e)}", status_code=400)
-
-    # 3. Headers Base (Chrome)
-    headers_base = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Referer": "https://www.in.gov.br/",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Dest": "document"
-    }
-
-    async with httpx.AsyncClient(timeout=90, follow_redirects=True, verify=False, headers=headers_base) as client:
         try:
-            # PASSO A: Login no Portal Principal
-            print(">>> [1/4] Logando...")
-            await client.get("https://www.in.gov.br/acesso.do") 
+            # 2. Encontra a pasta da data no InLabs
+            listing_url = await resolve_date_url(client, date)
             
-            payload = {"j_username": email, "j_password": senha, "entrar": "Entrar"}
-            login_resp = await client.post(
-                "https://www.in.gov.br/login_p_p_id_58_INSTANCE_942k_", 
-                data=payload
-            )
+            # 3. Baixa o HTML da listagem
+            html = await fetch_listing_html(client, date)
             
-            if "Falha ao entrar" in login_resp.text:
-                 return Response(content="Falha no Login InLabs. Verifique senha.", status_code=401)
-
-            # PASSO B: Validar Sessão na Leitura
-            print(f">>> [2/4] Validando sessão em: {url_leitura}")
-            await client.get(url_leitura)
-            await asyncio.sleep(1)
-
-            # --- PASSO C (NUCLEAR): Extração e Injeção Manual de Cookies ---
-            print(">>> [3/4] Construindo Header de Cookie Unificado...")
-            cookies_dict = {c.name: c.value for c in client.cookies.jar}
-            cookie_header_str = "; ".join([f"{k}={v}" for k, v in cookies_dict.items()])
+            # 4. Procura o link exato do PDF usando a função que já existe no seu código
+            pdf_url = pick_pdf_link_from_listing(html, listing_url, section)
             
-            download_headers = headers_base.copy()
-            download_headers["Cookie"] = cookie_header_str
-            download_headers["Host"] = "inlabs.in.gov.br"
-            download_headers["Referer"] = url_leitura
-            download_headers["Sec-Fetch-Site"] = "same-site"
+            if not pdf_url:
+                return Response(content=f"PDF da seção '{section.upper()}' não encontrado na data {date}.", status_code=404)
+                
+            print(f">>> Baixando PDF diretamente do InLabs: {pdf_url}")
             
-            print(f">>> [4/4] Baixando PDF (Forced Cookies): {url_download}")
-            
-            # CORREÇÃO: Uso direto do client.get sem o 'async with' que estava quebrando o httpx
-            r_pdf = await client.get(url_download, headers=download_headers, timeout=90.0)
+            # 5. Baixa o PDF de forma direta e autenticada
+            r_pdf = await client.get(pdf_url, timeout=90.0)
             
             if r_pdf.status_code != 200:
-                return Response(content=f"Erro {r_pdf.status_code} ao acessar arquivo.", status_code=404)
-            
+                return Response(content=f"Erro {r_pdf.status_code} ao acessar o arquivo.", status_code=404)
+                
             body_content = r_pdf.content
             tamanho = len(body_content)
             print(f">>> Tamanho final: {tamanho} bytes")
             
-            if tamanho < 20000: 
+            # Se for muito pequeno, é erro HTML disfarçado
+            if tamanho < 20000:
                 try:
                     texto = body_content.decode('utf-8', errors='ignore')
                     titulo = texto.split("<title>")[1].split("</title>")[0] if "<title>" in texto else "Sem Título"
                     print(f">>> CONTEÚDO ERRO: {titulo}")
                 except: pass
-
-                return Response(
-                    content=f"ERRO: O servidor rejeitou a sessão (Arquivo: {tamanho}b - {titulo}).",
-                    status_code=502
-                )
-
+                return Response(content="Erro: O InLabs retornou uma página inválida em vez do PDF.", status_code=502)
+            
+            # Cria um nome de arquivo amigável para salvar
+            filename = f"{date}_ASSINADO_{section.lower()}.pdf"
+                
             return Response(
                 content=body_content,
                 media_type="application/pdf",
@@ -254,10 +201,13 @@ async def download_pdf_inlabs(date: str, section: str = "do1"):
                     "Content-Length": str(tamanho)
                 }
             )
-
-        except Exception as e:
-            print(f"Erro Crítico: {e}")
-            return Response(content=f"Erro interno no fluxo: {str(e)}", status_code=500)
+            
+        finally:
+            await client.aclose()
+            
+    except Exception as e:
+        print(f"Erro Crítico no download do PDF: {e}")
+        return Response(content=f"Erro interno no fluxo: {str(e)}", status_code=500)
 
 # =====================================================================================
 # INICIALIZAÇÃO E CONFIGURAÇÕES
