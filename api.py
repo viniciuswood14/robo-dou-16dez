@@ -457,37 +457,56 @@ def monta_whatsapp(pubs: List[Publicacao], when: str) -> str:
 
     lines = [f"Bom dia, senhores!", "", f"PTC as seguintes publicações de interesse no DOU de {dd}:", ""]
 
-    if not pubs:
-        lines.append("— Sem ocorrências para os critérios informados —")
-        return "\n".join(lines)
-
-    pubs_by_section: Dict[str, List[Publicacao]] = {}
+    # Inicializa o dicionário garantindo que a Seção 1 e Seção 2 SEMPRE existam na lista
+    pubs_by_section: Dict[str, List[Publicacao]] = {
+        "1_DO1": [],
+        "2_DO2": []
+    }
+    
     for p in pubs:
         sec = p.section or "DOU"
         if "DO1" in sec or "Seção 1" in sec: sec_key = "1_DO1"
         elif "DO2" in sec or "Seção 2" in sec: sec_key = "2_DO2"
         elif "DO3" in sec or "Seção 3" in sec: sec_key = "3_DO3"
         else: sec_key = "4_OUTROS"
-        pubs_by_section.setdefault(sec_key, []).append(p)
+        
+        if sec_key not in pubs_by_section:
+            pubs_by_section[sec_key] = []
+        pubs_by_section[sec_key].append(p)
 
     for sec_key in sorted(pubs_by_section.keys()):
-        label = "🔰 Seção 1" if "DO1" in sec_key else ("🔰 Seção 2" if "DO2" in sec_key else "🔰 Outros")
+        # Se for Seção 3 ou Outros e estiver vazio, o robô oculta.
+        if sec_key in ["3_DO3", "4_OUTROS"] and not pubs_by_section[sec_key]:
+            continue
+
+        # Define o Cabeçalho
+        if "DO1" in sec_key: label = "🔰 Seção 1"
+        elif "DO2" in sec_key: label = "🔰 Seção 2"
+        elif "DO3" in sec_key: label = "🔰 Seção 3"
+        else: label = "🔰 Outros"
+
         lines.append(label)
         lines.append("")
 
-        for p in pubs_by_section[sec_key]:
-            lines.append(f"▶️ {p.organ or 'Órgão'}")
-            lines.append(f"📌 {clean_title(p.type) or 'Ato'}")
-            summary_clean = clean_html_text(p.summary) if p.summary else ""
-            if summary_clean:
-                lines.append(f"_{summary_clean}_") 
-            reason = p.relevance_reason or "Para conhecimento."
-            prefix = "⚓"
-            if "erro" in reason.lower() and "ia" in reason.lower(): prefix = "⚠️"
-            lines.append(f"{prefix} {reason}")
+        # Se a lista de publicações desta seção estiver vazia, imprime a mensagem de segurança
+        if not pubs_by_section[sec_key]:
+            lines.append("Não foram identificadas matérias de interesse.")
             lines.append("")
+        else:
+            # Se tiver conteúdo, imprime normalmente
+            for p in pubs_by_section[sec_key]:
+                lines.append(f"▶️ {p.organ or 'Órgão'}")
+                lines.append(f"📌 {clean_title(p.type) or 'Ato'}")
+                summary_clean = clean_html_text(p.summary) if p.summary else ""
+                if summary_clean:
+                    lines.append(f"_{summary_clean}_") 
+                reason = p.relevance_reason or "Para conhecimento."
+                prefix = "⚓"
+                if "erro" in reason.lower() and "ia" in reason.lower(): prefix = "⚠️"
+                lines.append(f"{prefix} {reason}")
+                lines.append("")
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip()
 
 def monta_valor_whatsapp(pubs: List[ValorPublicacao], when: str) -> str:
     lines = [f"📰 *Radar de Notícias (Defesa & Fiscal)* - {when}:\n"]
