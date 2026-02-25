@@ -323,15 +323,18 @@ NUNCA responda "Sem impacto". A ação da pessoa alvo deve ser descrita.
 # --- NOVO RADAR DE NOTÍCIAS (DEFESA E FISCAL) ---
 GEMINI_NOTICIAS_PROMPT = """
 Você é um analista de inteligência da Marinha do Brasil.
-Sua missão é avaliar se o TÍTULO desta notícia é RELEVANTE para a alta gestão governamental e militar.
+Sua missão é avaliar se o TÍTULO desta notícia reflete um FATO ou EVENTO NOVO e específico que seja útil para a alta gestão governamental e militar.
 
 TEMAS ALVO:
 1. Defesa: Ações, projetos estratégicos, orçamento e operações da Marinha do Brasil ou Ministério da Defesa.
-2. Fiscal/Orçamento: Tramitação da LOA/PLOA/LDO no Congresso, arcabouço fiscal, superávit/déficit fiscal, bloqueio/contingenciamento de gastos federais.
+2. Fiscal/Orçamento: Tramitação da LOA/PLOA/LDO no Congresso, arcabouço fiscal, superávit/déficit fiscal, bloqueio de gastos.
 
-REGRA DE OURO: Se a notícia for sobre mercado financeiro (bolsa, dólar), empresas privadas, política partidária sem impacto fiscal, ou matérias policiais rotineiras, responda APENAS com a frase exata: "Sem impacto direto."
+REGRAS DE REJEIÇÃO ABSOLUTA (Responda APENAS a frase exata "Sem impacto direto."):
+- Se o título for apenas o nome de um portal, site, ou canal genérico (Ex: "Agência Marinha de Notícias", "Portal da Defesa", "Página Inicial").
+- Se não relatar um acontecimento/notícia específica.
+- Se for sobre mercado financeiro corporativo (bolsa/dólar), empresas privadas ou política partidária sem impacto fiscal.
 
-Se for relevante aos Temas Alvo, escreva um resumo de 1 frase (máx 2 linhas) apontando o impacto ou a relevância da notícia.
+Se for um FATO NOVO e relevante aos Temas Alvo, escreva um resumo de 1 frase (máx 2 linhas) apontando o impacto ou a relevância da notícia.
 """
 
 SEARCH_QUERIES = [
@@ -340,32 +343,44 @@ SEARCH_QUERIES = [
     '"LOA" OR "LDO" OR "PLOA" OR "Orçamento da União"'
 ]
 
-# --- Configuração Google Drive Auth ---
-SCOPES_DRIVE = ['https://www.googleapis.com/auth/drive.readonly']
-
-def get_drive_service():
-    # Tenta autenticar no Google Drive usando Variável de Ambiente ou JSON local.
-    creds = None
+async def run_valor_analysis(today_str: str, use_state: bool = True) -> (List[Dict[str, Any]], Set[str]):
+    if not GEMINI_API_KEY: return [], set()
+    genai.configure(api_key=GEMINI_API_KEY)
+    try: model = genai.GenerativeModel("gemini-3-pro-preview")
+    except: return [], set()
     
-    # 1. Tenta ler da Variável de Ambiente (String JSON)
-    json_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if json_env:
+    google_results = []
+    for q in SEARCH_QUERIES:
         try:
-            info = json.loads(json_env)
-            creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES_DRIVE)
-        except json.JSONDecodeError:
-            print("❌ Erro: A variável GOOGLE_SERVICE_ACCOUNT_JSON não é um JSON válido.")
+            res = await perform_google_search(q, search_date=today_str)
+            google_results.extend(res)
+        except: pass
+        await asyncio.sleep(1)
     
-    # 2. Se não deu certo, tenta arquivo local
-    if not creds and os.path.exists("service_account.json"):
-        creds = service_account.Credentials.from_service_account_file("service_account.json", scopes=SCOPES_DRIVE)
+    final_articles, processed_links = [], set()
+    for res in google_results:
+        link = res.link.strip()
         
-    if creds:
-        return build('drive', 'v3', credentials=creds)
-    else:
-        print("⚠️ Aviso: Credenciais do Google Drive não encontradas.")
-        return None
-
+        # FILTRO ANTI-HOMEPAGE: Se o link for muito curto (só o domínio principal), é descartado na hora.
+        # Ex: https://www.agencia.marinha.mil.br/ é descartado. 
+        # Ex: https://www.agencia.marinha.mil.br/noticia-sobre-submarino é aprovado.
+        caminho_url = link.replace("https://", "").replace("http://", "")
+        if caminho_url.count("/") == 0 or (caminho_url.count("/") == 1 and caminho_url.endswith("/")):
+            continue # Pula homepages genéricas
+            
+        if link not in processed_links:
+            final_articles.append({"title": res.title, "link": link})
+            processed_links.add(link)
+    
+    pubs_finais, links_encontrados = [], set()
+    for item in final_articles:
+        ai_reason = await get_ai_analysis(f"TÍTULO: {item['title']}", model, GEMINI_NOTICIAS_PROMPT)
+        links_encontrados.add(item['link'])
+        
+        if ai_reason and "sem impacto direto" not in ai_reason.lower():
+            pubs_finais.append({"titulo": item['title'], "link": item['link'], "analise_ia": ai_reason})
+            
+    return pubs_finais, links_encontrados
 # =====================================================================================
 # CLASSES E MODELOS
 # =====================================================================================
