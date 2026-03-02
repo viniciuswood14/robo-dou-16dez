@@ -968,7 +968,8 @@ async def analyze_single_pub(pub: Publicacao, model, prompt_template):
 
 async def get_ai_analysis(clean_text: str, model: genai.GenerativeModel, prompt_template: str) -> Optional[str]:
     try:
-        prompt = f"{prompt_template}\n\n{clean_text[:12000]}"
+        # Removido o [:12000] para enviar a string inteira
+        prompt = f"{prompt_template}\n\n{clean_text}" 
         response = await model.generate_content_async(prompt)
         return norm(response.text)
     except Exception as e:
