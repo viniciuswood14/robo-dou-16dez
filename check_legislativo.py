@@ -1,5 +1,5 @@
 # Nome do arquivo: check_legislativo.py
-# Versão: 10.3 (Fix: Debug Import Telegram Exposto)
+# Versão: 10.4 (Fix: Senado KeyError e Movimentação Index)
 
 import os
 import json
@@ -211,7 +211,7 @@ async def check_tramitacoes_watchlist(commit: bool = True) -> Union[List[Dict], 
                         movs = resp.json().get('MovimentacaoMateria', {}).get('Materia', {}).get('Tramitacoes', {}).get('Tramitacao', [])
                         if isinstance(movs, dict): movs = [movs]
                         if movs: 
-                            last = movs[0]
+                            last = movs[-1] # CORREÇÃO 1: Mudado para -1 para pegar a última tramitação real
                             novo_status = f"{last.get('DataTramitacao')}: {last.get('IdentificacaoTramitacao', {}).get('DescricaoSituacao') or last.get('TextoTramitacao')}"
 
                 if novo_status and novo_status != info.get('last_status'):
@@ -267,7 +267,17 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
                     if isinstance(l, dict): l = [l]
                     if l:
                         d = l[0].get('DadosBasicosMateria', {})
-                        return {"uid": f"SEN_{d['CodigoMateria']}", "casa": "Senado", "tipo": d['SiglaMateria'], "numero": str(d['NumeroMateria']), "ano": str(d['AnoMateria']), "ementa": d['EmentaMateria'], "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{d['CodigoMateria']}", "last_status": "Manual"}
+                        # CORREÇÃO 2: Uso do método .get() para evitar KeyError e inclusão de valor padrão para a ementa
+                        return {
+                            "uid": f"SEN_{d.get('CodigoMateria')}", 
+                            "casa": "Senado", 
+                            "tipo": d.get('SiglaMateria'), 
+                            "numero": str(d.get('NumeroMateria')), 
+                            "ano": str(d.get('AnoMateria')), 
+                            "ementa": d.get('EmentaMateria', 'Sem ementa disponível'), 
+                            "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{d.get('CodigoMateria')}", 
+                            "last_status": "Manual"
+                        }
             except: pass
     return None
 
