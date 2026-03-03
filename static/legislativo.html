@@ -203,6 +203,9 @@
                 const borderClass = item.casa === "Câmara" ? "leg-camara" : "leg-senado";
                 const numDisplay = `${item.sigla} ${item.numero}/${item.ano}`;
 
+                // CORREÇÃO 1: Evita quebra de HTML se houver aspas simples na ementa
+                const safeItem = JSON.stringify(item).replace(/'/g, "&#39;");
+
                 const card = document.createElement("div");
                 card.className = `leg-card ${borderClass}`;
                 card.style.backgroundColor = "#fff";
@@ -212,7 +215,7 @@
                             <span class="leg-badge ${badgeClass}">${item.casa}</span>
                             <strong style="margin-left: 8px; font-size: 1.1em;">${numDisplay}</strong>
                         </div>
-                        <button onclick='toggleTrack(${JSON.stringify(item)})' style="background: #dc3545; border: none; padding: 4px 10px; font-size: 11px; border-radius: 4px; color: white; cursor: pointer;">Parar de Seguir</button>
+                        <button onclick='toggleTrack(${safeItem})' style="background: #dc3545; border: none; padding: 4px 10px; font-size: 11px; border-radius: 4px; color: white; cursor: pointer;">Parar de Seguir</button>
                     </div>
                     <div style="font-size: 13px; color: #555; margin: 8px 0; font-style: italic;">
                         ${(item.ementa || "Sem ementa").substring(0, 120)}...
@@ -230,6 +233,39 @@
         } catch (e) {
             watchlistContainer.innerHTML = `<p style="color:red; text-align:center;">Erro ao carregar monitoramento.</p>`;
         }
+      }
+
+      async function toggleTrack(itemData) {
+        const id_api = itemData.id_api || (itemData.uid ? itemData.uid.split('_')[1] : null) || itemData.id;
+        const prefix = itemData.casa === "Câmara" ? "CAM_" : "SEN_";
+        const finalUid = itemData.uid || (prefix + id_api);
+
+        // CORREÇÃO 2: Força todos os campos a serem Strings válidas (Evita o Erro 422 do FastAPI)
+        const payload = {
+            uid: String(finalUid || "Desconhecido"),
+            casa: String(itemData.casa || "N/A"),
+            tipo: String(itemData.tipo || itemData.sigla || "N/A"),
+            numero: String(itemData.numero || "0"),
+            ano: String(itemData.ano || "0"),
+            ementa: String(itemData.ementa || "Sem ementa disponível"),
+            link: String(itemData.link || "Sem link")
+        };
+
+        if(!confirm(`Remover ${payload.tipo} ${payload.numero}/${payload.ano} do monitoramento?`)) return;
+
+        try {
+            const res = await fetch(API_BASE + "/legislativo/track", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(payload)
+            });
+            const json = await res.json();
+            if(json.status === "ok") {
+                loadWatchlist();
+            } else {
+                alert("Falha ao atualizar o banco de dados.");
+            }
+        } catch (e) { alert("Erro de comunicação: " + e.message); }
       }
 
       async function toggleTrack(itemData) {
