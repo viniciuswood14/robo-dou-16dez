@@ -102,6 +102,21 @@ def _safe_get_list(data: dict, *keys) -> list:
         return [current]
     return []
 
+async def _fetch_senado_ementa(client: httpx.AsyncClient, codigo: str) -> str:
+    """Busca ementa no endpoint de detalhes quando a pesquisa básica retorna vazio."""
+    try:
+        url  = f"https://legis.senado.leg.br/dadosabertos/materia/{codigo}"
+        resp = await client.get(url, headers={"Accept": "application/json"}, timeout=10)
+        if resp.status_code == 200:
+            d = _safe_get_list(resp.json(), "DetalheMateria", "Materia")
+            if d:
+                ementa = (d[0].get("DadosBasicosMateria", {}) or {}).get("EmentaMateria", "")
+                if ementa:
+                    return ementa.strip()
+    except Exception as e:
+        print(f"[_fetch_senado_ementa] Erro para código {codigo}: {e}")
+    return ""
+
 # --- API HELPERS ---
 async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Dict]:
     results = []
@@ -348,7 +363,7 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
             except Exception as e:
                 print(f"[find_proposition/Câmara] Erro: {e}")
 
-        elif casa == 'Senado':
+elif casa == 'Senado':
             try:
                 resp = await client.get(
                     URL_SENADO,
@@ -358,20 +373,28 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
                 print(f"[find_proposition/Senado] HTTP {resp.status_code} para {sigla} {numero}/{ano}")
 
                 if resp.status_code == 200:
-                    # FIX: _safe_get_list evita crash quando Materias=null
                     l = _safe_get_list(resp.json(), "PesquisaBasicaMateria", "Materias", "Materia")
                     print(f"[find_proposition/Senado] {len(l)} resultado(s)")
 
                     if l:
                         d      = l[0].get('DadosBasicosMateria', {}) or {}
-                        codigo = d.get('CodigoMateria')
+                        codigo = str(d.get('CodigoMateria', ''))
+
+                        # Tenta pegar ementa da pesquisa básica
+                        ementa = d.get('EmentaMateria') or ""
+
+                        # FIX: se ementa vazia, busca no endpoint de detalhes
+                        if not ementa.strip() and codigo:
+                            print(f"[find_proposition/Senado] Ementa vazia, buscando detalhes para código {codigo}...")
+                            ementa = await _fetch_senado_ementa(client, codigo)
+
                         return {
                             "uid":         f"SEN_{codigo}",
                             "casa":        "Senado",
                             "tipo":        d.get('SiglaMateria', sigla),
                             "numero":      str(d.get('NumeroMateria', numero)),
                             "ano":         str(d.get('AnoMateria', ano)),
-                            "ementa":      d.get('EmentaMateria') or 'Sem ementa disponível',
+                            "ementa":      ementa or 'Sem ementa disponível',
                             "link":        f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}",
                             "last_status": "Manual"
                         }
@@ -380,8 +403,6 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
 
             except Exception as e:
                 print(f"[find_proposition/Senado] Erro: {e}")
-
-    return None
 
 # --- ROTINA AUTOMÁTICA (ROBÔ) ---
 async def rotina_legislativa_completa():
