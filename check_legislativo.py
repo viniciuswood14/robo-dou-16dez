@@ -1,5 +1,5 @@
 # Nome do arquivo: check_legislativo.py
-# Versão: 10.4 (Fix: Senado KeyError e Movimentação Index)
+# Versão: 10.5 (Fix: Senado NullSafe + Tramitações + Busca Robusta)
 
 import os
 import json
@@ -9,13 +9,10 @@ from datetime import datetime, timedelta
 from typing import List, Set, Dict, Tuple, Union
 
 # --- CORREÇÃO DE IMPORTAÇÃO (DEBUG) ---
-# Tenta importar o módulo de telegram e mostra o erro se falhar
 try:
     from telegram import send_telegram_message
-    # Opcional: print("✅ Módulo Telegram importado com sucesso no Legislativo!")
 except Exception as e:
     print(f"❌ ERRO CRÍTICO AO IMPORTAR TELEGRAM NO LEGISLATIVO: {e}")
-    # Mantém o mock apenas para não travar, mas avisando do erro
     async def send_telegram_message(msg):
         print(f"[TELEGRAM MOCK - IMPORT FALHOU] {msg}")
         return False
@@ -30,17 +27,16 @@ def _resolve_data_path(env_var: str, default_filename: str) -> str:
     return os.path.join(BASE_DIR, default_filename)
 
 STATE_FILE_PATH = _resolve_data_path("LEG_STATE_FILE_PATH", "legislativo_state2.json")
-TRACKING_FILE = _resolve_data_path("LEG_TRACKING_FILE_PATH", "legislativo_watchlist.json")
+TRACKING_FILE   = _resolve_data_path("LEG_TRACKING_FILE_PATH", "legislativo_watchlist.json")
 
-# Palavras-chave e Siglas
 KEYWORDS = [
-    "marinha", "forças armadas", "defesa", "submarino",  
-    "amazônia azul", "prosub", "tamandaré", "fundo naval", 
+    "marinha", "forças armadas", "defesa", "submarino",
+    "amazônia azul", "prosub", "tamandaré", "fundo naval",
     "base industrial de defesa", "autoridade marítima", "emgepron",
     "ctmsp", "amazul", "teto de gastos", "arcabouço", "meta fiscal"
 ]
 SENADO_SIGLAS = ["PLN", "PL", "PEC", "MPV", "PDL"]
-CAMARA_SIGLAS = ["PL", "PLP", "PEC", "MPV", "PLN"]
+CAMARA_SIGLAS  = ["PL", "PLP", "PEC", "MPV", "PLN"]
 
 URL_CAMARA = "https://dadosabertos.camara.leg.br/api/v2/proposicoes"
 URL_SENADO = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
@@ -80,76 +76,120 @@ def is_relevant(text: str) -> str:
             return kw.upper()
     return None
 
+# =====================================================================================
+# FIX CENTRAL: _safe_get_list
+#
+# A API do Senado retorna {"Materias": null} (None) quando não há resultados,
+# em vez de {"Materias": {"Materia": []}}. Qualquer cadeia
+# .get("Materias", {}).get("Materia", []) chama .get() sobre None → AttributeError
+# silencioso, como se não houvesse nenhum resultado.
+#
+# Esta função resolve navegando com segurança:
+#   - Retorna [] se qualquer nível for None ou não for dict
+#   - Converte dict único em [dict] (API retorna objeto, não lista, quando há 1 resultado)
+# =====================================================================================
+def _safe_get_list(data: dict, *keys) -> list:
+    current = data
+    for key in keys:
+        if not isinstance(current, dict):
+            return []
+        current = current.get(key)
+        if current is None:
+            return []
+    if isinstance(current, list):
+        return current
+    if isinstance(current, dict):
+        return [current]
+    return []
+
 # --- API HELPERS ---
 async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Dict]:
     results = []
     dt_inicio = (datetime.now() - timedelta(days=days_back_int)).strftime("%Y-%m-%d")
-    dt_fim = datetime.now().strftime("%Y-%m-%d")
-    params = {"dataApresentacaoInicio": dt_inicio, "dataApresentacaoFim": dt_fim, "itens": 100, "ordem": "DESC", "ordenarPor": "id"}
+    dt_fim    = datetime.now().strftime("%Y-%m-%d")
+    params  = {"dataApresentacaoInicio": dt_inicio, "dataApresentacaoFim": dt_fim,
+               "itens": 100, "ordem": "DESC", "ordenarPor": "id"}
     headers = {"Accept": "application/json", "User-Agent": "MonitorLegislativoMB/1.0"}
 
     try:
         resp = await client.get(URL_CAMARA, params=params, headers=headers, timeout=20)
         if resp.status_code == 200:
-            itens = resp.json().get("dados", [])
+            itens = resp.json().get("dados", []) or []
             for item in itens:
                 if item.get("siglaTipo") not in CAMARA_SIGLAS: continue
-                ementa = item.get("ementa", "")
+                ementa   = item.get("ementa", "")
                 found_kw = is_relevant(ementa)
                 if found_kw:
                     results.append({
-                        "uid": f"CAM_{item.get('id')}",
-                        "casa": "Câmara",
-                        "tipo": item.get("siglaTipo"),
-                        "numero": str(item.get("numero")),
-                        "ano": str(item.get("ano")),
-                        "ementa": ementa,
-                        "link": f"https://www.camara.leg.br/propostas-legislativas/{item.get('id')}",
+                        "uid":     f"CAM_{item.get('id')}",
+                        "casa":    "Câmara",
+                        "tipo":    item.get("siglaTipo"),
+                        "numero":  str(item.get("numero")),
+                        "ano":     str(item.get("ano")),
+                        "ementa":  ementa,
+                        "link":    f"https://www.camara.leg.br/propostas-legislativas/{item.get('id')}",
                         "keyword": found_kw,
-                        "data": item.get("dataApresentacao")
+                        "data":    item.get("dataApresentacao")
                     })
+        else:
+            print(f"[Câmara] HTTP {resp.status_code}")
     except Exception as e:
         print(f"[Câmara] Erro: {e}")
     return results
 
+
 async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Dict]:
-    results = []
-    headers = {"Accept": "application/json", "User-Agent": "MonitorLegislativoMB/1.0"}
-    ano_atual = datetime.now().year
+    results    = []
+    headers    = {"Accept": "application/json", "User-Agent": "MonitorLegislativoMB/1.0"}
+    ano_atual  = datetime.now().year
     limit_date = datetime.now() - timedelta(days=days_back_int + 2)
 
     for sigla in SENADO_SIGLAS:
         try:
-            url = f"{URL_SENADO}?sigla={sigla}&ano={ano_atual}"
-            resp = await client.get(url, headers=headers, timeout=20)
-            if resp.status_code == 200:
-                raw_list = resp.json().get("PesquisaBasicaMateria", {}).get("Materias", {}).get("Materia", [])
-                if isinstance(raw_list, dict): raw_list = [raw_list]
-                for mat in raw_list:
-                    dados = mat.get("DadosBasicosMateria", {})
-                    data_str = dados.get("DataApresentacao")
-                    if not data_str: continue
-                    try:
-                        if datetime.strptime(str(data_str)[:10], "%Y-%m-%d") < limit_date: continue
-                    except: continue
-                    
-                    ementa = dados.get("EmentaMateria", "")
-                    full_text = f"{ementa} {dados.get('NaturezaMateria', '')}"
-                    found_kw = is_relevant(full_text)
-                    if found_kw:
-                        results.append({
-                            "uid": f"SEN_{dados.get('CodigoMateria')}",
-                            "casa": "Senado",
-                            "tipo": dados.get("SiglaMateria"),
-                            "numero": str(dados.get("NumeroMateria")),
-                            "ano": str(dados.get("AnoMateria")),
-                            "ementa": ementa,
-                            "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{dados.get('CodigoMateria')}",
-                            "keyword": found_kw,
-                            "data": data_str
-                        })
+            # FIX: usa httpx params em vez de f-string para encoding correto
+            resp = await client.get(
+                URL_SENADO,
+                params={"sigla": sigla, "ano": ano_atual},
+                headers=headers,
+                timeout=20
+            )
+
+            if resp.status_code != 200:
+                print(f"[Senado] HTTP {resp.status_code} para sigla {sigla}")
+                continue
+
+            # FIX: _safe_get_list evita AttributeError quando Materias=null
+            raw_list = _safe_get_list(resp.json(), "PesquisaBasicaMateria", "Materias", "Materia")
+            print(f"[Senado] {sigla}/{ano_atual}: {len(raw_list)} matérias na API")
+
+            for mat in raw_list:
+                dados    = mat.get("DadosBasicosMateria", {}) or {}
+                data_str = dados.get("DataApresentacao")
+                if not data_str: continue
+                try:
+                    if datetime.strptime(str(data_str)[:10], "%Y-%m-%d") < limit_date: continue
+                except: continue
+
+                ementa    = dados.get("EmentaMateria", "") or ""
+                full_text = f"{ementa} {dados.get('NaturezaMateria', '') or ''}"
+                found_kw  = is_relevant(full_text)
+                if found_kw:
+                    codigo = dados.get("CodigoMateria")
+                    results.append({
+                        "uid":     f"SEN_{codigo}",
+                        "casa":    "Senado",
+                        "tipo":    dados.get("SiglaMateria") or sigla,
+                        "numero":  str(dados.get("NumeroMateria") or ""),
+                        "ano":     str(dados.get("AnoMateria") or ano_atual),
+                        "ementa":  ementa,
+                        "link":    f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}",
+                        "keyword": found_kw,
+                        "data":    data_str
+                    })
+
         except Exception as e:
             print(f"[Senado] Erro {sigla}: {e}")
+
     return results
 
 # --- CORE FUNCTIONS ---
@@ -168,7 +208,7 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
 
     all_proposals.sort(key=lambda x: x.get('data', ''), reverse=True)
 
-    new_items = []
+    new_items  = []
     ids_to_add = set()
     for p in all_proposals:
         if p['uid'] not in processed_ids:
@@ -176,12 +216,11 @@ async def check_and_process_legislativo(only_new: bool = True, days_back: int = 
             ids_to_add.add(p['uid'])
 
     if only_new:
-        # Se for para salvar imediatamente (API ou script simples)
         if commit and new_items:
             processed_ids.update(ids_to_add)
             save_state(processed_ids)
         return new_items
-    
+
     return all_proposals
 
 
@@ -191,111 +230,178 @@ async def check_tramitacoes_watchlist(commit: bool = True) -> Union[List[Dict], 
     Se commit=False (Robô): Retorna (updates, nova_watchlist) para salvar depois.
     """
     watchlist = load_watchlist()
-    updates = []
-    
-    async with httpx.AsyncClient(timeout=10) as client:
+    updates   = []
+
+    async with httpx.AsyncClient(timeout=15) as client:
         for uid, info in watchlist.items():
             try:
                 novo_status = None
+
                 if info['casa'] == 'Câmara':
-                    url = f"https://dadosabertos.camara.leg.br/api/v2/proposicoes/{info['id_api']}/tramitacoes"
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        d = resp.json().get('dados', [])
-                        if d: novo_status = f"{d[-1].get('dataHora', '')[:10]}: {d[-1].get('despacho') or d[-1].get('descricaoTramitacao')}"
-                
-                elif info['casa'] == 'Senado':
-                    url = f"https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{info['id_api']}"
+                    url  = f"https://dadosabertos.camara.leg.br/api/v2/proposicoes/{info['id_api']}/tramitacoes"
                     resp = await client.get(url, headers={"Accept": "application/json"})
                     if resp.status_code == 200:
-                        movs = resp.json().get('MovimentacaoMateria', {}).get('Materia', {}).get('Tramitacoes', {}).get('Tramitacao', [])
-                        if isinstance(movs, dict): movs = [movs]
-                        if movs: 
-                            last = movs[-1] # CORREÇÃO 1: Mudado para -1 para pegar a última tramitação real
-                            novo_status = f"{last.get('DataTramitacao')}: {last.get('IdentificacaoTramitacao', {}).get('DescricaoSituacao') or last.get('TextoTramitacao')}"
+                        d = resp.json().get('dados', []) or []
+                        if d:
+                            ultimo   = d[-1]
+                            despacho = ultimo.get('despacho') or ultimo.get('descricaoTramitacao') or "Sem descrição"
+                            novo_status = f"{str(ultimo.get('dataHora', ''))[:10]}: {despacho}"
+
+                elif info['casa'] == 'Senado':
+                    url  = f"https://legis.senado.leg.br/dadosabertos/materia/movimentacoes/{info['id_api']}"
+                    resp = await client.get(url, headers={"Accept": "application/json"})
+
+                    if resp.status_code == 200:
+                        # FIX: _safe_get_list para estrutura aninhada do Senado
+                        movs = _safe_get_list(
+                            resp.json(),
+                            "MovimentacaoMateria", "Materia", "Tramitacoes", "Tramitacao"
+                        )
+                        if movs:
+                            last = movs[-1]
+                            # FIX: fallbacks para cobrir variações de campo entre versões da API
+                            descricao = (
+                                (last.get("IdentificacaoTramitacao") or {}).get("DescricaoSituacao")
+                                or last.get("TextoTramitacao")
+                                or last.get("DescricaoSituacao")
+                                or "Sem descrição"
+                            )
+                            data_tram   = last.get("DataTramitacao") or ""
+                            novo_status = f"{str(data_tram)[:10]}: {descricao}"
+                    else:
+                        print(f"[WatchlistSenado] HTTP {resp.status_code} para {uid}")
 
                 if novo_status and novo_status != info.get('last_status'):
                     info['last_status'] = novo_status
                     updates.append({
-                        "uid": uid, "titulo": f"{info['sigla']} {info['numero']}/{info['ano']}",
-                        "status": novo_status, "link": info['link'], "ementa": info['ementa']
+                        "uid":    uid,
+                        "titulo": f"{info.get('sigla','?')} {info.get('numero','?')}/{info.get('ano','?')}",
+                        "status": novo_status,
+                        "link":   info.get('link', ''),
+                        "ementa": info.get('ementa', '')
                     })
+
             except Exception as e:
                 print(f"Erro watch {uid}: {e}")
 
     if commit and updates:
         save_watchlist(watchlist)
-        return updates  # Retorna só lista (Compatível API)
-    
+        return updates          # Retorna só lista (compatível com API)
+
     if not commit:
-        return updates, watchlist # Retorna tupla (Para o Robô tratar)
-    
+        return updates, watchlist   # Retorna tupla (para o Robô tratar)
+
     return updates
 
 # --- TRACKING MANUAL ---
 def toggle_tracking(item_data: Dict) -> str:
     watchlist = load_watchlist()
-    uid = item_data.get('uid')
+    uid = str(item_data.get('uid', ''))
+
     if uid in watchlist:
         del watchlist[uid]
         save_watchlist(watchlist)
         return "removido"
+
+    # FIX: split com maxsplit=1 para IDs que contenham underscore no valor
+    id_api = uid.split('_', 1)[1] if '_' in uid else uid
+
     watchlist[uid] = {
-        "casa": item_data.get('casa'), "id_api": item_data.get('uid').split('_')[1],
-        "sigla": item_data.get('tipo'), "numero": item_data.get('numero'), "ano": item_data.get('ano'),
-        "ementa": item_data.get('ementa'), "link": item_data.get('link'), "last_status": "Monitoramento Iniciado"
+        "casa":        item_data.get('casa'),
+        "id_api":      id_api,
+        "sigla":       item_data.get('tipo') or item_data.get('sigla', ''),
+        "numero":      str(item_data.get('numero', '')),
+        "ano":         str(item_data.get('ano', '')),
+        "ementa":      item_data.get('ementa', 'Sem ementa disponível'),
+        "link":        item_data.get('link', ''),
+        "last_status": "Monitoramento Iniciado"
     }
     save_watchlist(watchlist)
     return "adicionado"
 
+
 async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict:
     async with httpx.AsyncClient(timeout=15) as client:
+
         if casa == 'Câmara':
-            url = "https://dadosabertos.camara.leg.br/api/v2/proposicoes"
             try:
-                resp = await client.get(url, params={"siglaTipo": sigla, "numero": numero, "ano": ano, "ordem": "DESC", "ordenarPor": "id"})
-                if resp.status_code == 200 and resp.json().get('dados'):
-                    i = resp.json().get('dados')[0]
-                    return {"uid": f"CAM_{i['id']}", "casa": "Câmara", "tipo": i['siglaTipo'], "numero": str(i['numero']), "ano": str(i['ano']), "ementa": i['ementa'], "link": f"https://www.camara.leg.br/propostas-legislativas/{i['id']}", "last_status": "Manual"}
-            except: pass
-        elif casa == 'Senado':
-            url = "https://legis.senado.leg.br/dadosabertos/materia/pesquisa/lista"
-            try:
-                resp = await client.get(url, headers={"Accept": "application/json"}, params={"sigla": sigla, "numero": numero, "ano": ano})
+                resp = await client.get(
+                    URL_CAMARA,
+                    params={"siglaTipo": sigla, "numero": numero, "ano": ano, "ordem": "DESC", "ordenarPor": "id"},
+                    headers={"Accept": "application/json"}
+                )
                 if resp.status_code == 200:
-                    l = resp.json().get('PesquisaBasicaMateria', {}).get('Materias', {}).get('Materia', [])
-                    if isinstance(l, dict): l = [l]
-                    if l:
-                        d = l[0].get('DadosBasicosMateria', {})
-                        # CORREÇÃO 2: Uso do método .get() para evitar KeyError e inclusão de valor padrão para a ementa
+                    dados = resp.json().get('dados') or []
+                    if dados:
+                        i = dados[0]
                         return {
-                            "uid": f"SEN_{d.get('CodigoMateria')}", 
-                            "casa": "Senado", 
-                            "tipo": d.get('SiglaMateria'), 
-                            "numero": str(d.get('NumeroMateria')), 
-                            "ano": str(d.get('AnoMateria')), 
-                            "ementa": d.get('EmentaMateria', 'Sem ementa disponível'), 
-                            "link": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{d.get('CodigoMateria')}", 
+                            "uid":         f"CAM_{i['id']}",
+                            "casa":        "Câmara",
+                            "tipo":        i.get('siglaTipo', sigla),
+                            "numero":      str(i.get('numero', numero)),
+                            "ano":         str(i.get('ano', ano)),
+                            "ementa":      i.get('ementa', 'Sem ementa disponível'),
+                            "link":        f"https://www.camara.leg.br/propostas-legislativas/{i['id']}",
                             "last_status": "Manual"
                         }
-            except: pass
+                print(f"[find_proposition/Câmara] HTTP {resp.status_code} ou sem dados")
+            except Exception as e:
+                print(f"[find_proposition/Câmara] Erro: {e}")
+
+        elif casa == 'Senado':
+            try:
+                resp = await client.get(
+                    URL_SENADO,
+                    params={"sigla": sigla, "numero": numero, "ano": ano},
+                    headers={"Accept": "application/json"}
+                )
+                print(f"[find_proposition/Senado] HTTP {resp.status_code} para {sigla} {numero}/{ano}")
+
+                if resp.status_code == 200:
+                    # FIX: _safe_get_list evita crash quando Materias=null
+                    l = _safe_get_list(resp.json(), "PesquisaBasicaMateria", "Materias", "Materia")
+                    print(f"[find_proposition/Senado] {len(l)} resultado(s)")
+
+                    if l:
+                        d      = l[0].get('DadosBasicosMateria', {}) or {}
+                        codigo = d.get('CodigoMateria')
+                        return {
+                            "uid":         f"SEN_{codigo}",
+                            "casa":        "Senado",
+                            "tipo":        d.get('SiglaMateria', sigla),
+                            "numero":      str(d.get('NumeroMateria', numero)),
+                            "ano":         str(d.get('AnoMateria', ano)),
+                            "ementa":      d.get('EmentaMateria') or 'Sem ementa disponível',
+                            "link":        f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}",
+                            "last_status": "Manual"
+                        }
+                    else:
+                        print(f"[find_proposition/Senado] Nenhum resultado para {sigla} {numero}/{ano}")
+
+            except Exception as e:
+                print(f"[find_proposition/Senado] Erro: {e}")
+
     return None
 
 # --- ROTINA AUTOMÁTICA (ROBÔ) ---
 async def rotina_legislativa_completa():
     print(">>> Iniciando Rotina Legislativa (Modo Seguro)...")
-    
+
     # 1. Novas Proposições (commit=False para não salvar se falhar envio)
     new_items = await check_and_process_legislativo(only_new=True, days_back=3, commit=False)
-    
+
     if new_items:
         print(f"Novas proposições encontradas: {len(new_items)}")
         msg = ["🏛️ *Monitoramento Legislativo (Novidades)*"]
         for p in new_items:
-            msg.append(f"\n📍 *{p['casa']}* - {p['tipo']} {p['numero']}/{p['ano']}\n🔎 Tema: {p['keyword']}\n📝 {p['ementa'][:120]}...\n🔗 [Inteiro Teor]({p['link']})")
-        
+            msg.append(
+                f"\n📍 *{p['casa']}* - {p['tipo']} {p['numero']}/{p['ano']}\n"
+                f"🔎 Tema: {p['keyword']}\n"
+                f"📝 {p['ementa'][:120]}...\n"
+                f"🔗 [Inteiro Teor]({p['link']})"
+            )
+
         if await send_telegram_message("\n".join(msg)):
-            # Sucesso no envio: Salva IDs
             current_ids = load_state()
             for p in new_items: current_ids.add(p['uid'])
             save_state(current_ids)
@@ -305,14 +411,19 @@ async def rotina_legislativa_completa():
 
     # 2. Watchlist (commit=False)
     res = await check_tramitacoes_watchlist(commit=False)
-    updates, watchlist_updated = res # Desempacota a tupla
-    
+    updates, watchlist_updated = res   # desempacota a tupla
+
     if updates:
         print(f"Watchlist updates: {len(updates)}")
         msg = ["🏛️ *Atualização de Tramitação (Watchlist)*", ""]
         for up in updates:
-            msg.append(f"📌 *{up['titulo']}*\n📝 {up['ementa'][:100]}...\n🔄 Status: {up['status']}\n🔗 [Link]({up['link']})\n")
-        
+            msg.append(
+                f"📌 *{up['titulo']}*\n"
+                f"📝 {up['ementa'][:100]}...\n"
+                f"🔄 Status: {up['status']}\n"
+                f"🔗 [Link]({up['link']})\n"
+            )
+
         if await send_telegram_message("\n".join(msg)):
             save_watchlist(watchlist_updated)
             print("✅ Watchlist atualizada após envio.")
