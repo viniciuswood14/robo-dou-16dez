@@ -1,5 +1,5 @@
 # Nome do arquivo: check_legislativo.py
-# Versão: 10.5 (Fix: Senado NullSafe + Tramitações + Busca Robusta)
+# Versão: 10.6 (Fix: SyntaxError find_proposition + Ementa Detalhes Senado)
 
 import os
 import json
@@ -78,15 +78,9 @@ def is_relevant(text: str) -> str:
 
 # =====================================================================================
 # FIX CENTRAL: _safe_get_list
-#
-# A API do Senado retorna {"Materias": null} (None) quando não há resultados,
-# em vez de {"Materias": {"Materia": []}}. Qualquer cadeia
-# .get("Materias", {}).get("Materia", []) chama .get() sobre None → AttributeError
-# silencioso, como se não houvesse nenhum resultado.
-#
-# Esta função resolve navegando com segurança:
-#   - Retorna [] se qualquer nível for None ou não for dict
-#   - Converte dict único em [dict] (API retorna objeto, não lista, quando há 1 resultado)
+# A API do Senado retorna {"Materias": null} quando não há resultados.
+# .get("Materias", {}).get("Materia", []) chama .get() sobre None → AttributeError.
+# Esta função navega com segurança e também converte dict único em [dict].
 # =====================================================================================
 def _safe_get_list(data: dict, *keys) -> list:
     current = data
@@ -102,6 +96,7 @@ def _safe_get_list(data: dict, *keys) -> list:
         return [current]
     return []
 
+
 async def _fetch_senado_ementa(client: httpx.AsyncClient, codigo: str) -> str:
     """Busca ementa no endpoint de detalhes quando a pesquisa básica retorna vazio."""
     try:
@@ -116,6 +111,7 @@ async def _fetch_senado_ementa(client: httpx.AsyncClient, codigo: str) -> str:
     except Exception as e:
         print(f"[_fetch_senado_ementa] Erro para código {codigo}: {e}")
     return ""
+
 
 # --- API HELPERS ---
 async def check_camara(client: httpx.AsyncClient, days_back_int: int) -> List[Dict]:
@@ -161,7 +157,6 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
 
     for sigla in SENADO_SIGLAS:
         try:
-            # FIX: usa httpx params em vez de f-string para encoding correto
             resp = await client.get(
                 URL_SENADO,
                 params={"sigla": sigla, "ano": ano_atual},
@@ -173,7 +168,6 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
                 print(f"[Senado] HTTP {resp.status_code} para sigla {sigla}")
                 continue
 
-            # FIX: _safe_get_list evita AttributeError quando Materias=null
             raw_list = _safe_get_list(resp.json(), "PesquisaBasicaMateria", "Materias", "Materia")
             print(f"[Senado] {sigla}/{ano_atual}: {len(raw_list)} matérias na API")
 
@@ -206,6 +200,7 @@ async def check_senado(client: httpx.AsyncClient, days_back_int: int) -> List[Di
             print(f"[Senado] Erro {sigla}: {e}")
 
     return results
+
 
 # --- CORE FUNCTIONS ---
 
@@ -267,14 +262,12 @@ async def check_tramitacoes_watchlist(commit: bool = True) -> Union[List[Dict], 
                     resp = await client.get(url, headers={"Accept": "application/json"})
 
                     if resp.status_code == 200:
-                        # FIX: _safe_get_list para estrutura aninhada do Senado
                         movs = _safe_get_list(
                             resp.json(),
                             "MovimentacaoMateria", "Materia", "Tramitacoes", "Tramitacao"
                         )
                         if movs:
                             last = movs[-1]
-                            # FIX: fallbacks para cobrir variações de campo entre versões da API
                             descricao = (
                                 (last.get("IdentificacaoTramitacao") or {}).get("DescricaoSituacao")
                                 or last.get("TextoTramitacao")
@@ -301,12 +294,13 @@ async def check_tramitacoes_watchlist(commit: bool = True) -> Union[List[Dict], 
 
     if commit and updates:
         save_watchlist(watchlist)
-        return updates          # Retorna só lista (compatível com API)
+        return updates
 
     if not commit:
-        return updates, watchlist   # Retorna tupla (para o Robô tratar)
+        return updates, watchlist
 
     return updates
+
 
 # --- TRACKING MANUAL ---
 def toggle_tracking(item_data: Dict) -> str:
@@ -318,7 +312,6 @@ def toggle_tracking(item_data: Dict) -> str:
         save_watchlist(watchlist)
         return "removido"
 
-    # FIX: split com maxsplit=1 para IDs que contenham underscore no valor
     id_api = uid.split('_', 1)[1] if '_' in uid else uid
 
     watchlist[uid] = {
@@ -363,7 +356,7 @@ async def find_proposition(casa: str, sigla: str, numero: str, ano: str) -> Dict
             except Exception as e:
                 print(f"[find_proposition/Câmara] Erro: {e}")
 
-elif casa == 'Senado':
+        elif casa == 'Senado':                                          # ← indentação correta
             try:
                 resp = await client.get(
                     URL_SENADO,
@@ -379,13 +372,11 @@ elif casa == 'Senado':
                     if l:
                         d      = l[0].get('DadosBasicosMateria', {}) or {}
                         codigo = str(d.get('CodigoMateria', ''))
-
-                        # Tenta pegar ementa da pesquisa básica
                         ementa = d.get('EmentaMateria') or ""
 
-                        # FIX: se ementa vazia, busca no endpoint de detalhes
+                        # Se ementa vazia, busca no endpoint de detalhes
                         if not ementa.strip() and codigo:
-                            print(f"[find_proposition/Senado] Ementa vazia, buscando detalhes para código {codigo}...")
+                            print(f"[find_proposition/Senado] Ementa vazia, buscando detalhes para {codigo}...")
                             ementa = await _fetch_senado_ementa(client, codigo)
 
                         return {
@@ -404,11 +395,13 @@ elif casa == 'Senado':
             except Exception as e:
                 print(f"[find_proposition/Senado] Erro: {e}")
 
+    return None
+
+
 # --- ROTINA AUTOMÁTICA (ROBÔ) ---
 async def rotina_legislativa_completa():
     print(">>> Iniciando Rotina Legislativa (Modo Seguro)...")
 
-    # 1. Novas Proposições (commit=False para não salvar se falhar envio)
     new_items = await check_and_process_legislativo(only_new=True, days_back=3, commit=False)
 
     if new_items:
@@ -430,9 +423,8 @@ async def rotina_legislativa_completa():
         else:
             print("❌ Falha no Telegram. Estado NÃO salvo.")
 
-    # 2. Watchlist (commit=False)
     res = await check_tramitacoes_watchlist(commit=False)
-    updates, watchlist_updated = res   # desempacota a tupla
+    updates, watchlist_updated = res
 
     if updates:
         print(f"Watchlist updates: {len(updates)}")
